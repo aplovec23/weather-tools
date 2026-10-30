@@ -1,0 +1,1142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Similar Cyclone Finder</title>
+<style>
+  :root {
+    --surface: #fcfcfb; --panel: #f4f3f0; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --line: #e1e0d9; --axis: #c3c2b7; --accent: #2a78d6; --warn-bg: #fdf3dc; --warn-ink: #6b4a00;
+    --m1: #2a78d6; --m2: #eb6834; --m3: #1baf7a; --m4: #eda100; --m5: #e87ba4; --sea: #f4f7fb;
+    --m6: #7d52d9; --m7: #0f9ab8; --m8: #9a6b3f; --m9: #6f9f00; --m10: #5c6f96;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: #1a1a19; --panel: #242423; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --line: #2c2c2a; --axis: #383835; --accent: #3987e5; --warn-bg: #3a2f12; --warn-ink: #f3d68a;
+      --m1: #3987e5; --m2: #d95926; --m3: #199e70; --m4: #c98500; --m5: #d55181; --sea: #1f2226;
+      --m6: #9b7bf0; --m7: #22b3d1; --m8: #b98558; --m9: #8fbf1f; --m10: #8494bd;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1080px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 10px; }
+  h3 { font-size: 14.5px; margin: 16px 0 6px; }
+  p { margin: 6px 0; }
+  .sub { color: var(--ink-2); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: end; }
+  label { display: block; font-size: 12.5px; color: var(--ink-2); margin-bottom: 3px; }
+  label.check { display: flex; gap: 7px; align-items: center; font-size: 13.5px; margin: 8px 0 0; }
+  input, select, button { font: inherit; color: var(--ink); background: var(--surface);
+                          border: 1px solid var(--axis); border-radius: 7px; padding: 6px 8px; }
+  input[type=number] { width: 100%; min-width: 0; }
+  input[type=checkbox], input[type=radio] { width: auto; }
+  select { max-width: 100%; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: 8px 16px; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { font-size: 12.5px; color: var(--ink-2); font-weight: 600; }
+  table.fixes td { border-bottom: 0; padding: 3px 6px 3px 0; }
+  table.fixes th { border-bottom: 0; padding: 0 6px 4px 0; }
+  .swatch { display: inline-block; width: 22px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 7px; }
+  .note { background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 9px 12px; font-size: 13.5px; }
+  .error { color: #d03b3b; font-weight: 600; }
+  #map, .chart { width: 100%; height: auto; background: var(--sea); border: 1px solid var(--line); border-radius: 10px; }
+  #map { touch-action: pan-y; }
+  #map.zoomed { touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+  .zoom { margin-left: auto; display: flex; gap: 5px; align-items: center; }
+  .zoom .small { margin-right: 6px; }
+  .zoom button { min-width: 32px; padding: 3px 9px; font-weight: 600; }
+  .zoom button:disabled { opacity: .4; cursor: default; }
+  .keys { margin: 8px 0 0; font-size: 13px; color: var(--ink-2); }
+  .keys .group { display: flex; flex-wrap: wrap; gap: 2px 16px; align-items: center; margin: 2px 0; }
+  .keys b { color: var(--ink); font-weight: 600; }
+  .keys .item { display: inline-flex; gap: 5px; align-items: center; }
+  .keys .item svg { flex: none; width: 34px; height: 24px; }
+  .keys label.item { display: inline-flex; font-size: inherit; color: inherit; margin: 0; cursor: pointer; }
+  .keys label.item input { margin: 0 1px 0 0; }
+  #matches tr.off { opacity: .4; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13.5px; margin: 8px 0 0; color: var(--ink-2); }
+  small, .small { font-size: 12.5px; color: var(--ink-2); }
+  #results { display: none; }
+  .bar { display: flex; height: 18px; width: 220px; border-radius: 4px; overflow: hidden; background: var(--line); gap: 2px; }
+  .bar i { display: block; height: 100%; }
+  .up { background: var(--m2); } .flat { background: var(--muted); } .down { background: var(--m1); }
+  .key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 10px; vertical-align: baseline; }
+  .combo { position: relative; }
+  .combo input { width: 250px; max-width: 100%; }
+  #suggest, .suggest { position: absolute; z-index: 5; left: 0; right: 0; top: 100%; margin: 3px 0 0; padding: 4px; list-style: none;
+             background: var(--surface); border: 1px solid var(--axis); border-radius: 8px; max-height: 300px;
+             overflow-y: auto; box-shadow: 0 6px 18px rgba(0, 0, 0, .18); }
+  #suggest li, .suggest li { padding: 6px 8px; border-radius: 6px; cursor: pointer; display: flex; justify-content: space-between; gap: 12px; }
+  #suggest li span, .suggest li span { color: var(--ink-2); font-size: 12.5px; white-space: nowrap; }
+  #suggest li.active, #suggest li:hover, .suggest li.active, .suggest li:hover { background: var(--panel); }
+  #suggest li.none, .suggest li.none { cursor: default; color: var(--ink-2); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Similar Cyclone Finder</h1>
+  <p class="sub">Which past tropical cyclone is this one like? Enter the last four synoptic fixes, and the forecast
+    track if there is one, and the page lists the most similar cyclones in the JMA best-track record,
+    <span id="span"></span>.</p>
+
+  <h2>1. The cyclone now</h2>
+  <div class="panel">
+    <div class="row" style="margin-bottom:12px">
+      <div><label for="date">Date of the latest fix (UTC)</label><input type="date" id="date"></div>
+      <div><label for="hour">Synoptic hour</label>
+        <select id="hour"><option>0000Z</option><option>0600Z</option><option>1200Z</option><option>1800Z</option></select></div>
+      <div class="combo"><label for="find">Or load a past cyclone (2010 to present)</label>
+        <input type="search" id="find" placeholder="Type a name or a year…" autocomplete="off" role="combobox"
+               aria-expanded="false" aria-controls="suggest" aria-autocomplete="list">
+        <ul id="suggest" role="listbox" hidden></ul></div>
+      <div id="momentBox" style="display:none"><label for="moment">At this moment of its life</label>
+        <select id="moment" disabled><option value="">–</option></select></div>
+    </div>
+    <div class="scroll">
+      <table class="fixes">
+        <thead><tr><th>Fix</th><th>Latitude (°N)</th><th>Longitude (°E)</th><th>10-minute maximum wind (km/h)</th>
+          <th>Central pressure (hPa), optional</th></tr></thead>
+        <tbody id="fixes"></tbody>
+      </table>
+    </div>
+    <p class="small"><b>Only the latest position is required.</b> Leave blank anything that is not known: the search
+      uses whatever is entered. Earlier positions add the track so far, and the wind adds intensity. Central pressure
+      is not matched; it is only used to estimate the wind where the wind is blank. The date is set to today; change
+      it only to replay an earlier moment.</p>
+
+    <h3>Forecast track (optional)</h3>
+    <p class="small">Enter the forecast position of the centre at any of these lead times. The search then looks for
+      past cyclones that were like this one so far <b>and</b> went where this one is forecast to go.</p>
+    <div class="scroll">
+      <table class="fixes" style="max-width:520px">
+        <thead><tr><th>Lead time</th><th>Latitude (°N)</th><th>Longitude (°E)</th></tr></thead>
+        <tbody id="forecast"></tbody>
+      </table>
+    </div>
+    <label class="check" id="actualRow" style="display:none"><input type="checkbox" id="actual">
+      Use this past cyclone's actual later positions as the forecast track (to test the idea)</label>
+    <label class="check" id="uptoRow" style="display:none"><input type="checkbox" id="upto">
+      Fair test: use only its track up to this moment, as a forecaster would have had it then (otherwise its whole track is compared)</label>
+    <label class="check" id="laterRow" style="display:none"><input type="checkbox" id="later">
+      Also compare with cyclones that came after it (otherwise only earlier cyclones)</label>
+
+    <fieldset id="modeBox" style="border:0;padding:0;margin:12px 0 0;display:flex;flex-wrap:wrap;gap:4px 18px;align-items:center">
+      <legend style="float:left;padding:0;margin-right:4px;font-size:13.5px;font-weight:600">Match on</legend>
+      <label class="check" style="margin:0"><input type="radio" name="mode" value="both" checked> Track, then strength</label>
+      <label class="check" style="margin:0"><input type="radio" name="mode" value="track"> Track only</label>
+      <label class="check" style="margin:0"><input type="radio" name="mode" value="strength"> Strength only</label>
+      <label class="check" id="shapeBox" style="margin:0" for="shapeLimit">Same shape: leave out tracks whose direction differs by more than
+        <select id="shapeLimit" style="padding:2px 4px"><option value="15">15°</option><option value="20">20°</option>
+          <option value="30" selected>30°</option><option value="45">45°</option><option value="999">no limit</option></select></label>
+      <span class="small">The time of year is always matched.</span>
+    </fieldset>
+    <div class="row" style="margin-top:10px;align-items:center">
+      <label for="howMany" style="margin:0;font-size:13.5px;font-weight:600;color:var(--ink)">Similar cyclones to find</label>
+      <select id="howMany"><option>3</option><option>5</option><option selected>10</option><option>15</option><option>20</option></select>
+      <span class="small">All of them are drawn on the map; untick any that do not fit.</span>
+    </div>
+
+    <div class="row" style="margin-top:12px">
+      <button class="primary" id="go">Find similar cyclones</button>
+      <button id="clear" title="Empty every field and start a new entry">Clear all</button>
+      <span id="message" class="error" role="alert"></span>
+    </div>
+  </div>
+
+  <section id="results">
+    <h2>2. The <span class="howMany">10</span> most similar past cyclones</h2>
+    <p class="sub" id="summary"></p>
+    <div class="scroll"><table id="matches"></table></div>
+    <p class="small">Most similar first. All are drawn on the map; to take one off, untick it in the legend under the map (its row here turns grey).</p>
+
+    <h2>3. Tracks</h2>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 20px;margin:0 0 8px">
+      <label class="check" style="margin:0"><input type="checkbox" class="areaToggle" data-area="PAR"> Show PAR on the map</label>
+      <label class="check" style="margin:0"><input type="checkbox" class="areaToggle" data-area="TCAD"> Show TCAD</label>
+      <label class="check" style="margin:0"><input type="checkbox" class="areaToggle" data-area="TCID"> Show TCID</label>
+      <label class="check" style="margin:0"><input type="checkbox" class="fixToggle" data-step="12"> 12-hourly positions</label>
+      <label class="check" style="margin:0"><input type="checkbox" class="fixToggle" data-step="6"> 6-hourly positions</label>
+      <label class="check" style="margin:0"><input type="checkbox" class="symToggle"> PAGASA strength symbols</label>
+      <label class="check" style="margin:0"><input type="checkbox" class="keyToggle"> Strength legend</label>
+      <label class="check" style="margin:0"><input type="checkbox" class="timeToggle"> Date and time (UTC)</label>
+      <div class="zoom" data-map="map"><span class="small">Pinch to zoom, drag to move</span>
+        <button type="button" data-zoom="in" title="Zoom in" aria-label="Zoom in">+</button>
+        <button type="button" data-zoom="out" title="Zoom out" aria-label="Zoom out">&minus;</button>
+        <button type="button" data-zoom="reset" title="Back to the whole view">Reset</button></div>
+    </div>
+    <svg id="map" viewBox="0 0 1000 600" role="img" aria-label="Map of the cyclone and its most similar past cyclones"></svg>
+    <div class="keys" id="legend" aria-label="Legend"></div>
+
+    <h2>4. What the <span class="howMany">10</span> most similar cases did next</h2>
+    <p class="note">A rough guide only. In a fair test on the 2023–2025 cyclones (each replayed with only its track up
+      to that moment, no forecast track, ten similar cyclones), the position given here was off by about 330 km at 24 hours,
+      620 km at 48 hours and 890 km at 72 hours. That beats assuming the cyclone does not move (480, 920 and 1,310 km), but
+      it is several times larger than operational forecast errors, and the wind was hardly better than assuming no change.
+      Use it as a comparison with the past, not as forecast guidance.</p>
+    <p class="sub">Every 6 hours over the next three days.</p>
+    <div class="scroll"><table id="guidance"></table></div>
+
+    <h2>5. Intensification outlook</h2>
+    <p class="sub">How did past cyclones in the same place change in strength, every 6 hours over the next two days?
+      The track is ignored here.</p>
+    <div class="row" style="margin:8px 0 10px">
+      <div><label for="oRadius">Same place: within</label>
+        <select id="oRadius"><option value="150">150 km</option><option value="300" selected>300 km</option>
+          <option value="500">500 km</option></select></div>
+      <label class="check"><input type="checkbox" id="oStrength" checked> Same strength (within 10 km/h)</label>
+      <label class="check"><input type="checkbox" id="oSeason" checked> Same time of year (within 30 days)</label>
+    </div>
+    <p class="sub" id="oSummary"></p>
+    <div class="scroll"><table id="outlook"></table></div>
+    <details style="margin-top:8px"><summary class="small" style="cursor:pointer">Show the past cyclones used</summary>
+      <div class="scroll"><table id="oList"></table></div></details>
+    <p class="note" style="margin-top:10px">Read this as a tendency. Tested on 21,000 past cases, cyclones matched on
+      place, strength and time of year had the same outcome (intensified, steady or weakened) about half the time,
+      against a third by chance; the typical change of the group was off by about 15 km/h, against 21 km/h for
+      assuming no change. Place alone, without strength, tells much less.</p>
+  </section>
+
+  <h2>About</h2>
+  <p class="small">Tracks are compared first, as whole tracks. A past cyclone selected from the record is compared by its
+    complete track with the complete track of every earlier cyclone, over the life of the shorter of the two (how long each
+    cyclone lasted does not count, but one track must be at least half as long as the other); a cyclone that is entered is compared by its positions and
+    forecast track, and a past cyclone matches if it passed along that path. Two things are measured along the tracks, in
+    steps of 50 km: how far apart they lie, and how different their directions of travel are; the time of year counts as
+    well. Tracks whose direction differs by more than the chosen limit on average are left out, which removes those that
+    recurve where the other runs straight. With “Track, then strength”, the closest tracks (as many as were asked for) are then put in order of
+    how alike their wind was along the track. “Strength only” ignores the track and matches the wind over the last four
+    synoptic hours. If only one position is entered there is no track yet, and that position is matched instead. Only
+    cyclones that ended before the date entered are compared, so a past cyclone can be replayed fairly.</p>
+  <p class="small">Data: Japan Meteorological Agency best track via IBTrACS v04r01 (NOAA NCEI); coastline from
+    Natural Earth. Winds before 1977 and at tropical depression stage are estimated from central pressure. Names are
+    international names. The latest season in the file may be provisional. Built <span id="built"></span>.</p>
+</main>
+
+<script>
+const DATA = /*__DATA__*/null;
+const EPOCH = Date.UTC(1950, 0, 1);
+const LEADS = [24, 48, 72];
+const GUIDE_LEADS = [6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72];     // section 4: every record of the 6-hourly best track, to three days
+const BUFFER_HOURS = 15 * 24;
+let TOP = 10;                              // how many similar cyclones are listed, and averaged in "what they did next"; chosen in the form
+// who may be compared: normally only cyclones that had ended before the date entered; with "also later" every cyclone but itself
+let allowLater = false, selfIndex = -1;
+const usable = (si, hour) => allowLater ? si !== selfIndex : lastHourOf[si] <= hour - BUFFER_HOURS;
+const EXAMPLE_FROM = 2010;            // first season offered in the "load a past cyclone" list
+const FORECAST_WEIGHT = 3;            // weight of the forecast track, the same as movement
+//              group         size  weight
+// Matching is on intensity (wind), track (position and movement) and the time of year. Central pressure has
+// weight 0, so it is not matched; give it a weight to bring it back.
+const GROUPS = [["wind",       4, 2], ["pressure", 4, 0], ["latitude", 4, 2], ["longitude", 4, 2],
+                ["movement",   6, 3], ["season",   2, 1]];
+const DIM = GROUPS.reduce((n, g) => n + g[1], 0);
+const DIM_GROUP = GROUPS.flatMap(g => Array(g[1]).fill(g[0]));         // which group each number of a case belongs to
+// what each choice of "Match on" leaves out; the time of year always takes part
+const MODE_SKIPS = {both: [], track: ["wind", "pressure"], strength: ["latitude", "longitude", "movement"]};
+const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+// PAGASA areas that can be outlined on the maps, as [longitude, latitude] corners, each with its own dash pattern
+const AREAS = [
+  {key: "PAR",  title: "Philippine Area of Responsibility",   dash: "9 6",
+   corners: [[115, 5], [115, 15], [120, 21], [120, 25], [135, 25], [135, 5]]},
+  {key: "TCAD", title: "Tropical Cyclone Advisory Domain",    dash: "14 5 3 5",
+   corners: [[114, 4], [114, 27], [145, 27], [145, 4]]},
+  {key: "TCID", title: "Tropical Cyclone Information Domain", dash: "3 5",
+   corners: [[110, 0], [110, 27], [155, 27], [155, 0]]},
+];
+const shown = {};                                                      // which areas are ticked
+let showSymbols = true;                                                // PAGASA symbols for strength, in place of plain dots
+let showTimes = false;                                                 // date and time (UTC) written beside the marks on the tracks
+let showKey = true;                                                    // the strength legend inside the map
+let fixStep = 0;                                                       // positions marked along the tracks: every 6 or 12 hours, 0 for none
+let lastMap = null;
+let pathMode = false;                                                  // the last search compared whole tracks
+const hiddenMatches = new Set();                                       // similar cyclones unticked in the legend (their place in the list)
+const $ = id => document.getElementById(id);
+
+// ---- zooming and moving the two maps: buttons, pinch (touch screen or trackpad) and drag
+// each map keeps a magnification k and the centre of its view, as a fraction of the whole (unzoomed) frame
+const ZOOM = {map: {k: 1, cx: 0.5, cy: 0.5}}, MAX_ZOOM = 12;
+const redrawMap = {map: () => { if (lastMap) drawMap(...lastMap); }};
+const redrawQueued = {};
+function zoomFrame(id, w, e, s, n) {       // the part of the whole frame that the zoomed view shows
+  const z = ZOOM[id], lon = e - w, lat = n - s;
+  return [w + (z.cx - 0.5 / z.k) * lon, w + (z.cx + 0.5 / z.k) * lon, n - (z.cy + 0.5 / z.k) * lat, n - (z.cy - 0.5 / z.k) * lat];
+}
+function gridStep(span) { return span > 45 ? 10 : span > 20 ? 5 : span > 8 ? 2 : 1; }   // degrees between grid lines
+function markZoom(id) {
+  const zoomed = ZOOM[id].k > 1.001;
+  $(id).classList.toggle("zoomed", zoomed);
+  const box = document.querySelector(`.zoom[data-map="${id}"]`);
+  box.querySelector('[data-zoom="out"]').disabled = box.querySelector('[data-zoom="reset"]').disabled = !zoomed;
+  box.querySelector('[data-zoom="in"]').disabled = ZOOM[id].k >= MAX_ZOOM;
+}
+let mapFrame = null;                       // the whole view of the map (west, east, south, north); worked out afresh when null
+function resetZoom(id) { Object.assign(ZOOM[id], {k: 1, cx: 0.5, cy: 0.5}); mapFrame = null; markZoom(id); }
+// magnify by factor about the point (fx, fy) of the picture (fractions of its width and height), which then moves by (dx, dy)
+function zoomBy(id, factor, fx, fy, dx = 0, dy = 0) {
+  const z = ZOOM[id], k = Math.min(MAX_ZOOM, Math.max(1, z.k * factor));
+  const held = [z.cx + (fx - 0.5) / z.k, z.cy + (fy - 0.5) / z.k];    // the place under the fingers stays under them
+  const keep = v => Math.min(1 - 0.5 / k, Math.max(0.5 / k, v));      // never beyond the whole frame
+  z.cx = keep(held[0] - (fx + dx - 0.5) / k); z.cy = keep(held[1] - (fy + dy - 0.5) / k); z.k = k;
+  markZoom(id);
+  if (!redrawQueued[id]) { redrawQueued[id] = true; requestAnimationFrame(() => { redrawQueued[id] = false; redrawMap[id](); }); }
+}
+Object.keys(ZOOM).forEach(id => {
+  const el = $(id), pointers = new Map();
+  const at = p => { const r = el.getBoundingClientRect(); return [(p[0] - r.left) / r.width, (p[1] - r.top) / r.height]; };
+  document.querySelectorAll(`.zoom[data-map="${id}"] button`).forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.zoom === "reset") { resetZoom(id); redrawMap[id](); }
+    else zoomBy(id, b.dataset.zoom === "in" ? 1.6 : 1 / 1.6, 0.5, 0.5);
+  }));
+  // one finger or the mouse moves a zoomed map; two fingers pinch
+  el.addEventListener("pointerdown", ev => {
+    pointers.set(ev.pointerId, [ev.clientX, ev.clientY]);
+    if (pointers.size === 2 || ZOOM[id].k > 1.001) { try { el.setPointerCapture(ev.pointerId); } catch (e) {} }
+  });
+  el.addEventListener("pointermove", ev => {
+    if (!pointers.has(ev.pointerId)) return;
+    const before = [...pointers.values()].map(at);
+    pointers.set(ev.pointerId, [ev.clientX, ev.clientY]);
+    const after = [...pointers.values()].map(at);
+    if (pointers.size === 1 && ZOOM[id].k > 1.001)
+      zoomBy(id, 1, before[0][0], before[0][1], after[0][0] - before[0][0], after[0][1] - before[0][1]);
+    else if (pointers.size === 2) {
+      const r = el.getBoundingClientRect();
+      const mid = p => [(p[0][0] + p[1][0]) / 2, (p[0][1] + p[1][1]) / 2];
+      const apart = p => Math.hypot((p[0][0] - p[1][0]) * r.width, (p[0][1] - p[1][1]) * r.height) || 1;
+      const a = mid(before), b = mid(after);
+      zoomBy(id, apart(after) / apart(before), a[0], a[1], b[0] - a[0], b[1] - a[1]);
+    }
+  });
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach(type => el.addEventListener(type, ev => pointers.delete(ev.pointerId)));
+  // trackpad pinch: Safari reports it as a gesture, other browsers as a wheel turn with Ctrl
+  el.addEventListener("wheel", ev => {
+    if (!ev.ctrlKey) return;                                           // ordinary scrolling still moves the page
+    ev.preventDefault();
+    const p = at([ev.clientX, ev.clientY]);
+    zoomBy(id, Math.exp(-ev.deltaY * 0.01), p[0], p[1]);
+  }, {passive: false});
+  let scale = 1;
+  el.addEventListener("gesturestart", ev => { ev.preventDefault(); scale = 1; });
+  el.addEventListener("gesturechange", ev => {
+    ev.preventDefault();
+    if (pointers.size) return;                                         // fingers on a touch screen are handled above
+    const p = at([ev.clientX, ev.clientY]);
+    zoomBy(id, ev.scale / scale, p[0], p[1]); scale = ev.scale;
+  });
+  el.addEventListener("gestureend", ev => ev.preventDefault());
+  markZoom(id);
+});
+
+// ---- helpers
+const hourToDate = h => new Date(EPOCH + h * 3600e3);
+const fmtDate = h => hourToDate(h).toLocaleDateString("en-GB", {day: "2-digit", month: "short", year: "numeric", timeZone: "UTC"});
+const fmtHour = h => String(hourToDate(h).getUTCHours()).padStart(2, "0") + "00Z";
+function dayAngle(h) {
+  const d = hourToDate(h), start = Date.UTC(d.getUTCFullYear(), 0, 0);
+  return 2 * Math.PI * ((d - start) / 86400e3) / 365.25;
+}
+function windFromPressure(p) {
+  const P = DATA.lookupP, W = DATA.lookupW;
+  if (p > P[P.length - 1]) return Math.min(DATA.wprA * Math.pow(Math.max(1010 - p, 0.5), DATA.wprB), W[W.length - 1]);
+  if (p <= P[0]) return W[0];
+  let i = 1; while (P[i] < p) i++;
+  return W[i - 1] + (W[i] - W[i - 1]) * (p - P[i - 1]) / (P[i] - P[i - 1]);
+}
+function distanceKm(lat1, lon1, lat2, lon2) {
+  const r = Math.PI / 180, a = Math.sin((lat2 - lat1) * r / 2) ** 2 +
+        Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin((lon2 - lon1) * r / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(a));
+}
+function moving(latA, lonA, latB, lonB, hours = 6) {     // from A (some hours earlier) to B
+  const speed = distanceKm(latA, lonA, latB, lonB) / hours;
+  if (speed < 1) return "Stationary";
+  const bearing = Math.atan2((lonB - lonA) * Math.cos(latB * Math.PI / 180), latB - latA) * 180 / Math.PI;
+  return COMPASS[((Math.round(bearing / 45) % 8) + 8) % 8] + " " + speed.toFixed(0) + " km/h";
+}
+// raw (unscaled) vector from four fixes [lat, lon, pressure, wind] (oldest first) and the hour of the last one
+function rawVector(fixes, hour, out, at) {
+  for (let k = 0; k < 4; k++) {
+    out[at + k] = fixes[k][3]; out[at + 4 + k] = fixes[k][2];
+    out[at + 8 + k] = fixes[k][0]; out[at + 12 + k] = fixes[k][1];
+  }
+  for (let k = 0; k < 3; k++) {
+    out[at + 16 + k] = fixes[k + 1][0] - fixes[k][0];
+    out[at + 19 + k] = fixes[k + 1][1] - fixes[k][1];
+  }
+  const a = dayAngle(hour); out[at + 22] = Math.sin(a); out[at + 23] = Math.cos(a);
+}
+
+// ---- build the archive of cases once
+const storms = DATA.storms.map(s => ({name: s[0], season: s[1], fixes: s[2],
+                                      index: new Map(s[2].map((f, i) => [f[0], i]))}));
+const hasHistory = (s, h) => s.index.has(h - 6) && s.index.has(h - 12) && s.index.has(h - 18);
+const caseStorm = [], caseFix = [], caseHour = [];
+storms.forEach((s, si) => s.fixes.forEach((f, i) => {
+  if (hasHistory(s, f[0])) { caseStorm.push(si); caseFix.push(i); caseHour.push(f[0]); }
+}));
+const N = caseStorm.length;
+const X = new Float32Array(N * DIM);
+function historyOf(si, i) {
+  const s = storms[si], h = s.fixes[i][0];
+  return [18, 12, 6, 0].map(back => { const f = s.fixes[s.index.get(h - back)]; return [f[1], f[2], f[3], f[4]]; });
+}
+for (let c = 0; c < N; c++) rawVector(historyOf(caseStorm[c], caseFix[c]), caseHour[c], X, c * DIM);
+// standardise each group and scale it so that its total influence equals its weight
+const SHIFT = new Float32Array(DIM), SCALE = new Float32Array(DIM);
+{ let at = 0;
+  for (const [, size, weight] of GROUPS) {
+    let sum = 0, sq = 0;
+    for (let c = 0; c < N; c++) for (let k = 0; k < size; k++) { const v = X[c * DIM + at + k]; sum += v; sq += v * v; }
+    const mean = sum / (N * size), sd = Math.sqrt(sq / (N * size) - mean * mean);
+    for (let k = 0; k < size; k++) { SHIFT[at + k] = mean; SCALE[at + k] = weight / (sd * Math.sqrt(size)); }
+    at += size;
+  }
+  for (let c = 0; c < N; c++) for (let k = 0; k < DIM; k++) X[c * DIM + k] = (X[c * DIM + k] - SHIFT[k]) * SCALE[k];
+}
+const lastHourOf = storms.map(s => s.fixes[s.fixes.length - 1][0]);
+function futureOf(c, lead) {
+  const s = storms[caseStorm[c]], i = s.index.get(caseHour[c] + lead);
+  return i === undefined ? null : s.fixes[i];
+}
+// how far each case's centre moved by each lead time (NaN if the cyclone did not last that long)
+const MOVED = new Float32Array(N * LEADS.length * 2).fill(NaN), MOVED_SD = [];
+LEADS.forEach((lead, l) => {
+  let sum = 0, sq = 0, n = 0;
+  for (let c = 0; c < N; c++) {
+    const f = futureOf(c, lead); if (!f) continue;
+    const base = storms[caseStorm[c]].fixes[caseFix[c]], dLat = f[1] - base[1], dLon = f[2] - base[2];
+    MOVED[(c * LEADS.length + l) * 2] = dLat; MOVED[(c * LEADS.length + l) * 2 + 1] = dLon;
+    sum += dLat + dLon; sq += dLat * dLat + dLon * dLon; n += 2;
+  }
+  MOVED_SD.push(Math.sqrt(sq / n - (sum / n) ** 2));
+});
+
+// forecast: array of [lat, lon] or null for each lead time
+function search(fixes, hour, forecast, mode) {
+  const q = new Float32Array(DIM); rawVector(fixes, hour, q, 0);
+  for (let k = 0; k < DIM; k++) q[k] = (q[k] - SHIFT[k]) * SCALE[k];
+  const dims = [];                              // only the numbers that were entered (and are matched) take part
+  for (let k = 0; k < DIM; k++) if (!Number.isNaN(q[k]) && SCALE[k] !== 0 && !MODE_SKIPS[mode].includes(DIM_GROUP[k])) dims.push(k);
+  const used = mode === "strength" ? [] : LEADS.map((lead, l) => l).filter(l => forecast && forecast[l]);   // the forecast track is track
+  const moved = used.map(l => [forecast[l][0] - fixes[3][0], forecast[l][1] - fixes[3][1]]);
+  const scale = used.map(l => FORECAST_WEIGHT / (MOVED_SD[l] * Math.sqrt(2 * used.length)));
+  const found = [];
+  for (let c = 0; c < N; c++) {
+    if (!usable(caseStorm[c], hour)) continue;                         // normally only cyclones that had already ended
+    let d = 0, lasted = true;
+    for (let u = 0; u < used.length; u++) {
+      const at = (c * LEADS.length + used[u]) * 2, dLat = MOVED[at];
+      if (Number.isNaN(dLat)) { lasted = false; break; }               // did not last as long as the forecast
+      const a = (dLat - moved[u][0]) * scale[u], b = (MOVED[at + 1] - moved[u][1]) * scale[u];
+      d += a * a + b * b;
+    }
+    if (!lasted) continue;
+    for (const k of dims) { const x = X[c * DIM + k] - q[k]; d += x * x; }
+    found.push([d, c]);
+  }
+  found.sort((a, b) => a[0] - b[0]);
+  return found;
+}
+
+// ---- whole-track matching: how close two paths lie on the map and how alike their shapes are, whatever the timing,
+// speed or strength along them. Each path is first cut into steps of equal length, so that a slow stretch counts no
+// more than a fast one. Each step of one path is then compared with the nearest step of the other: how far apart
+// they are, and how different their directions of travel are (a track that recurves where the other runs straight
+// differs by 90 degrees or more there). Both are averaged along the path.
+const PATH_STEP = 50;                      // km between the steps
+const HEADING_KM = 10;                     // each degree of difference in direction weighs like 10 km between the tracks
+const MIN_SHARE = 0.5;                     // two complete tracks are compared only if the shorter is at least half as long as the longer
+const SEASON_KM_PER_DAY = 3;               // the time of year counts too: a month apart weighs like 90 km
+const casesOf = storms.map(() => []);
+caseStorm.forEach((si, c) => casesOf[si].push(c));
+function steps(path) {                     // [lat, lon, wind] points to [lat, lon, direction of travel, wind] every PATH_STEP km
+  const out = [[path[0][0], path[0][1], 0, path[0][2]]];
+  let need = PATH_STEP;
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1], length = distanceKm(a[0], a[1], b[0], b[1]);
+    let done = 0;
+    while (length - done >= need) { done += need; const f = done / length; out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, 0, a[2] + (b[2] - a[2]) * f]); need = PATH_STEP; }
+    need -= length - done;
+  }
+  if (out.length < 2) { const z = path[path.length - 1]; out.push([z[0], z[1], 0, z[2]]); }
+  out.forEach((p, i) => { const a = out[Math.max(0, i - 1)], b = out[Math.min(out.length - 1, i + 1)];
+    p[2] = Math.atan2((b[1] - a[1]) * Math.cos(a[0] * Math.PI / 180), b[0] - a[0]) * 180 / Math.PI; });
+  return out;
+}
+let stormSteps = null;                     // worked out for every past cyclone at the first whole-track search
+function along(from, to) {                 // [average km to the other path, average difference in direction, degrees]
+  let km = 0, turn = 0;
+  for (const p of from) {
+    const k = Math.cos(p[0] * Math.PI / 180);
+    let nearest = Infinity, heading = 0;
+    for (const q of to) { const d = Math.hypot((q[1] - p[1]) * k, q[0] - p[0]); if (d < nearest) { nearest = d; heading = q[2]; } }
+    let angle = Math.abs(p[2] - heading) % 360; if (angle > 180) angle = 360 - angle;
+    km += nearest * 111.2; turn += angle;
+  }
+  return [km / from.length, turn / from.length];
+}
+// strength along the track: the wind at each of these points against the past cyclone's wind where it passed nearest,
+// as the average difference in km/h. points: [lat, lon, direction, wind]; those without a wind are skipped
+function windApart(points, past) {
+  let sum = 0, n = 0;
+  for (const p of points) {
+    if (Number.isNaN(p[3]) || p[3] === undefined) continue;
+    const k = Math.cos(p[0] * Math.PI / 180);
+    let nearest = Infinity, wind = 0;
+    for (const q of past) { const d = Math.hypot((q[1] - p[1]) * k, q[0] - p[0]); if (d < nearest) { nearest = d; wind = q[3]; } }
+    sum += Math.abs(p[3] - wind); n++;
+  }
+  return n ? sum / n : null;
+}
+const dayOfYear = h => dayAngle(h) / (2 * Math.PI) * 365.25;
+// path: the track to compare, as [lat, lon, wind] points. whole: true when it is a complete track, which is compared
+// with each past track over the life of the shorter of the two; false for a path that was entered, where a past
+// cyclone only has to have passed along it in the same direction. limit: past cyclones whose direction differs by more degrees are left out.
+// Returns {found: [score, the case nearest to the latest position, km between the tracks, degrees], dropped}.
+function searchPaths(path, whole, lat, lon, hour, limit) {
+  if (!stormSteps) stormSteps = storms.map(s => steps(s.fixes.map(f => [f[1], f[2], f[4]])));
+  const mine = steps(path), found = [], today = dayOfYear(hour);
+  let dropped = 0, uneven = 0;
+  storms.forEach((s, si) => {
+    if (!usable(si, hour) || !casesOf[si].length) return;              // normally only cyclones that had already ended
+    // Two complete tracks are compared over the life of the shorter one, so that a cyclone that formed earlier or
+    // lasted longer is not marked down for it: the shorter track must lie along the longer one. A track less than
+    // half as long as the other is too little to compare.
+    const theirs = stormSteps[si], shorter = !whole || mine.length <= theirs.length ? mine : theirs, longer = shorter === mine ? theirs : mine;
+    if (whole && shorter.length < MIN_SHARE * longer.length) { uneven++; return; }
+    const [km, turn] = along(shorter, longer);
+    if (turn > limit) { dropped++; return; }                           // a different shape: recurves, loops or runs another way
+    let at = -1, near = Infinity;
+    for (const c of casesOf[si]) { const f = s.fixes[caseFix[c]], d = distanceKm(lat, lon, f[1], f[2]); if (d < near) { near = d; at = c; } }
+    const gap = Math.abs(dayOfYear(caseHour[at]) - today), days = Math.min(gap, 365.25 - gap);
+    found.push([Math.hypot(km + HEADING_KM * turn, SEASON_KM_PER_DAY * days), at, km, turn]);
+  });
+  found.sort((a, b) => a[0] - b[0]);
+  return {found, dropped, uneven};
+}
+
+// ---- form
+const LABELS = ["18 hours earlier", "12 hours earlier", "6 hours earlier", "Latest fix"];
+$("fixes").innerHTML = LABELS.map((label, k) =>
+  `<tr><td>${label}</td>` + ["lat", "lon", "wind", "pres"].map(field =>
+    `<td><input type="number" step="${field === "pres" || field === "wind" ? 1 : 0.1}" id="${field}${k}" ` +
+    `aria-label="${label}: ${field}"></td>`).join("") + "</tr>").join("");
+$("forecast").innerHTML = LEADS.map((lead, l) =>
+  `<tr><td>+${lead} hours</td><td><input type="number" step="0.1" id="flat${l}" aria-label="Forecast latitude at +${lead} hours"></td>` +
+  `<td><input type="number" step="0.1" id="flon${l}" aria-label="Forecast longitude at +${lead} hours"></td></tr>`).join("");
+$("span").textContent = `${DATA.firstYear}–${DATA.lastYear} (${storms.length.toLocaleString()} cyclones)`;
+$("built").textContent = DATA.built;
+
+// past cyclones to load: every cyclone from EXAMPLE_FROM onward, found by typing part of a name or a year
+const examples = [];
+storms.forEach((s, si) => {
+  if (s.season >= EXAMPLE_FROM && s.fixes.some(f => hasHistory(s, f[0]))) examples.push(si);
+});
+let loaded = null;                    // [storm, fix] of the past cyclone currently loaded, if any
+function fillFrom(si, i) {
+  loaded = [si, i];
+  const s = storms[si], hour = s.fixes[i][0], d = hourToDate(hour);
+  $("date").value = d.toISOString().slice(0, 10);
+  $("hour").selectedIndex = d.getUTCHours() / 6;
+  historyOf(si, i).forEach((f, k) => {
+    $("lat" + k).value = f[0]; $("lon" + k).value = f[1]; $("pres" + k).value = f[2]; $("wind" + k).value = f[3];
+  });
+  LEADS.forEach((lead, l) => {
+    const f = $("actual").checked ? s.fixes[s.index.get(hour + lead)] : null;
+    $("flat" + l).value = f ? f[1] : ""; $("flon" + l).value = f ? f[2] : "";
+  });
+  // the form is filled, but nothing is searched or shown until "Find similar cyclones" is clicked
+  $("message").textContent = ""; $("results").style.display = "none"; lastMap = null;
+}
+function chooseCyclone(si) {
+  const s = storms[si];
+  $("find").value = `${s.name} ${s.season}`;
+  hideSuggestions();
+  const moments = s.fixes.map((f, i) => i).filter(i => hasHistory(s, s.fixes[i][0]));
+  const named = moments.find(i => s.fixes[i][5] === 1);               // first hour at tropical storm strength
+  const start = named === undefined ? moments[0] : named;
+  $("moment").innerHTML = moments.map(i => { const f = s.fixes[i];
+    return `<option value="${i}"${i === start ? " selected" : ""}>${fmtDate(f[0]).slice(0, 6)} ${fmtHour(f[0])} — ` +
+           `${f[4]} km/h, ${f[3]} hPa${i === named ? " (named)" : ""}</option>`; }).join("");
+  $("moment").disabled = false; $("momentBox").style.display = ""; $("actualRow").style.display = "flex";
+  $("uptoRow").style.display = "flex"; $("laterRow").style.display = "flex";
+  fillFrom(si, start);
+}
+// suggestions while typing: names that start with the text first, then names that contain it; a year lists that season
+let suggested = [], active = -1;
+function suggest() {
+  const words = $("find").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) { hideSuggestions(); return; }
+  const rank = si => {
+    const name = storms[si].name.toLowerCase(), year = String(storms[si].season);
+    let score = 0;
+    for (const w of words) {
+      if (name.startsWith(w)) score += 0; else if (name.includes(w)) score += 1;
+      else if (year.startsWith(w) || year === w) score += 0; else return null;
+    }
+    return score;
+  };
+  suggested = examples.map(si => [rank(si), si]).filter(r => r[0] !== null)
+    .sort((a, b) => a[0] - b[0] || storms[b[1]].season - storms[a[1]].season || storms[a[1]].name.localeCompare(storms[b[1]].name))
+    .slice(0, 40).map(r => r[1]);                 // enough for a whole season; the list scrolls
+  active = suggested.length ? 0 : -1;
+  $("suggest").innerHTML = suggested.length
+    ? suggested.map((si, n) => { const s = storms[si], peak = Math.max(...s.fixes.map(f => f[4]));
+        return `<li role="option" data-n="${n}"${n === active ? ' class="active"' : ""}>${s.name} ${s.season}` +
+               `<span>peak ${peak} km/h</span></li>`; }).join("")
+    : `<li class="none">No cyclone from ${EXAMPLE_FROM} onward matches</li>`;
+  $("suggest").hidden = false; $("find").setAttribute("aria-expanded", "true");
+}
+function hideSuggestions() { $("suggest").hidden = true; $("find").setAttribute("aria-expanded", "false"); active = -1; }
+$("find").addEventListener("input", suggest);
+$("find").addEventListener("focus", () => { if ($("find").value.trim()) suggest(); });
+$("find").addEventListener("blur", () => setTimeout(hideSuggestions, 150));
+$("find").addEventListener("keydown", event => {
+  if ($("suggest").hidden || !suggested.length) return;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    active = (active + (event.key === "ArrowDown" ? 1 : -1) + suggested.length) % suggested.length;
+    [...$("suggest").children].forEach((li, n) => li.classList.toggle("active", n === active));
+    $("suggest").children[active].scrollIntoView({block: "nearest"});
+  } else if (event.key === "Enter") { event.preventDefault(); chooseCyclone(suggested[active]); }
+  else if (event.key === "Escape") hideSuggestions();
+});
+$("suggest").addEventListener("mousedown", event => {
+  const li = event.target.closest("li[data-n]"); if (li) { event.preventDefault(); chooseCyclone(suggested[+li.dataset.n]); }
+});
+$("moment").addEventListener("change", () => { if (loaded) fillFrom(loaded[0], +$("moment").value); });
+$("actual").addEventListener("change", () => { if (loaded) fillFrom(loaded[0], loaded[1]); });
+$("clear").addEventListener("click", () => {
+  document.querySelectorAll("#fixes input, #forecast input").forEach(el => el.value = "");
+  $("date").value = ""; $("find").value = ""; hideSuggestions(); $("message").textContent = ""; $("results").style.display = "none";
+  $("moment").innerHTML = '<option value="">–</option>'; $("moment").disabled = true; $("momentBox").style.display = "none";
+  $("actual").checked = false; $("actualRow").style.display = "none"; loaded = null;
+  $("upto").checked = false; $("later").checked = false; $("uptoRow").style.display = "none"; $("laterRow").style.display = "none"; $("howMany").value = "10";
+  document.querySelector('input[name="mode"][value="both"]').checked = true; $("shapeLimit").value = "30"; syncMode();
+  setNow(); lastQuery = null; lastMap = null;                                          // back to a blank form, dated now, for a new entry
+  window.scrollTo({top: 0, behavior: "smooth"}); $("lat3").focus();
+});
+$("go").addEventListener("click", run);
+const syncMode = () => $("shapeBox").style.display = document.querySelector('input[name="mode"]:checked').value === "strength" ? "none" : "";
+document.querySelectorAll('input[name="mode"]').forEach(radio => radio.addEventListener("change", syncMode));
+// one setting for both maps: the two tick boxes stay in step, and the choice is remembered on this computer
+document.querySelectorAll(".areaToggle").forEach(box => box.addEventListener("change", () => {
+  const key = box.dataset.area;
+  shown[key] = box.checked;
+  document.querySelectorAll(`.areaToggle[data-area="${key}"]`).forEach(other => other.checked = shown[key]);
+  try { localStorage.setItem("show" + key, shown[key] ? "1" : "0"); } catch (e) {}
+  resetZoom("map");                               // the whole view, so that a ticked area is seen
+  if (lastMap) drawMap(...lastMap);
+}));
+document.querySelectorAll(".symToggle").forEach(box => box.addEventListener("change", () => {
+  showSymbols = box.checked;
+  try { localStorage.setItem("showSymbols", showSymbols ? "1" : "0"); } catch (e) {}
+  syncSymbols();
+  if (lastMap) drawMap(...lastMap);
+}));
+try { showSymbols = localStorage.getItem("showSymbols") !== "0"; } catch (e) {}
+document.querySelectorAll(".keyToggle").forEach(box => box.addEventListener("change", () => {
+  showKey = box.checked;
+  try { localStorage.setItem("showKey", showKey ? "1" : "0"); } catch (e) {}
+  syncSymbols();
+  if (lastMap) drawMap(...lastMap);
+}));
+try { showKey = localStorage.getItem("showKey") !== "0"; } catch (e) {}
+document.querySelectorAll(".timeToggle").forEach(box => box.addEventListener("change", () => {
+  showTimes = box.checked;
+  try { localStorage.setItem("showTimes", showTimes ? "1" : "0"); } catch (e) {}
+  if (lastMap) drawMap(...lastMap);
+}));
+try { showTimes = localStorage.getItem("showTimes") === "1"; } catch (e) {}
+document.querySelectorAll(".timeToggle").forEach(box => box.checked = showTimes);
+// positions along the tracks: every 12 hours or every 6, one or the other (or neither); the view stays where it is
+const syncFixes = () => document.querySelectorAll(".fixToggle").forEach(box => box.checked = +box.dataset.step === fixStep);
+document.querySelectorAll(".fixToggle").forEach(box => box.addEventListener("change", () => {
+  fixStep = box.checked ? +box.dataset.step : 0;
+  syncFixes();
+  try { localStorage.setItem("fixStep", fixStep); } catch (e) {}
+  if (lastMap) drawMap(...lastMap);
+}));
+try { const saved = +localStorage.getItem("fixStep"); fixStep = saved === 6 || saved === 12 ? saved : 0; } catch (e) {}
+syncFixes();
+AREAS.forEach(a => { try { shown[a.key] = localStorage.getItem("show" + a.key) === "1"; } catch (e) { shown[a.key] = false; } });
+document.querySelectorAll(".areaToggle").forEach(box => box.checked = !!shown[box.dataset.area]);
+setNow();                                                              // a new entry starts at today's date and the latest synoptic hour
+
+function nowUTC() {                            // today's date and the latest synoptic hour, in UTC
+  const n = new Date();
+  return {date: n.toISOString().slice(0, 10), slot: Math.floor(n.getUTCHours() / 6)};
+}
+function setNow() { const n = nowUTC(); $("date").value = n.date; $("hour").selectedIndex = n.slot; }
+function readForm() {
+  if (!$("date").value) $("date").value = nowUTC().date;        // a new entry needs no date: today is used
+  const [y, m, d] = $("date").value.split("-").map(Number);
+  const hour = (Date.UTC(y, m - 1, d, $("hour").selectedIndex * 6) - EPOCH) / 3600e3;
+  const inBasin = (lat, lon) => lat >= 0 && lat <= 60 && lon >= 90 && lon <= 190;
+  const fixes = [], estimated = [], pressureGiven = [];
+  for (let k = 0; k < 4; k++) {
+    const lat = parseFloat($("lat" + k).value), lon = parseFloat($("lon" + k).value);
+    const pres = parseFloat($("pres" + k).value);
+    let wind = parseFloat($("wind" + k).value);
+    // Only the latest position is required. Anything else left blank is simply not used in the match.
+    if (Number.isNaN(lat) !== Number.isNaN(lon)) throw `"${LABELS[k]}": enter both latitude and longitude, or leave both blank.`;
+    if (k === 3 && Number.isNaN(lat)) throw "Enter at least the latitude and longitude of the latest fix.";
+    if (!Number.isNaN(lat) && !inBasin(lat, lon)) throw `"${LABELS[k]}": the position is outside the western North Pacific.`;
+    if (!Number.isNaN(pres) && (pres < 850 || pres > 1020)) throw `"${LABELS[k]}": the central pressure should be between 850 and 1020 hPa.`;
+    const fromPressure = Number.isNaN(wind) && !Number.isNaN(pres);
+    if (fromPressure) wind = windFromPressure(pres);
+    if (!Number.isNaN(wind) && (wind < 0 || wind > 350)) throw `"${LABELS[k]}": the wind should be between 0 and 350 km/h.`;
+    estimated.push(fromPressure);
+    pressureGiven.push(!Number.isNaN(pres));
+    fixes.push([lat, lon, Number.isNaN(pres) ? 1000 : pres, wind]);   // pressure is not matched; 1000 is a placeholder
+  }
+  const forecast = LEADS.map((lead, l) => {
+    const lat = parseFloat($("flat" + l).value), lon = parseFloat($("flon" + l).value);
+    if (Number.isNaN(lat) && Number.isNaN(lon)) return null;
+    if (Number.isNaN(lat) || Number.isNaN(lon)) throw `Forecast at +${lead} hours: enter both latitude and longitude, or leave both blank.`;
+    if (!inBasin(lat, lon)) throw `Forecast at +${lead} hours: the position is outside the western North Pacific.`;
+    return [lat, lon];
+  });
+  return {hour, fixes, estimated, forecast, pressureGiven};
+}
+
+// ---- results
+const COLOURS = ["var(--m1)", "var(--m2)", "var(--m3)", "var(--m4)", "var(--m5)", "var(--m6)", "var(--m7)", "var(--m8)", "var(--m9)", "var(--m10)"];
+const colourOf = k => COLOURS[k % COLOURS.length], dashOf = k => k >= COLOURS.length ? "7 4" : "";   // the 11th to 20th are dashed
+function run() {
+  $("message").textContent = "";
+  TOP = +$("howMany").value;
+  document.querySelectorAll(".howMany").forEach(el => el.textContent = TOP);
+  let input;
+  try { input = readForm(); } catch (problem) { $("message").textContent = problem; $("results").style.display = "none"; return; }
+  const {hour, fixes, estimated, forecast, pressureGiven} = input;
+  const mode = document.querySelector('input[name="mode"]:checked').value;
+  if (mode === "strength" && fixes.every(f => Number.isNaN(f[3]))) {
+    $("message").textContent = "Enter a wind (or a central pressure) to match on strength only.";
+    $("results").style.display = "none"; return;
+  }
+  // a loaded past cyclone counts as "selected" only while the form still shows its own latest fix
+  const own = loaded && storms[loaded[0]].fixes[loaded[1]][0] === hour &&
+              storms[loaded[0]].fixes[loaded[1]][1] === fixes[3][0] && storms[loaded[0]].fixes[loaded[1]][2] === fixes[3][1]
+              ? storms[loaded[0]] : null;
+  // Track means the whole track: a selected past cyclone is compared by its complete track, an entered cyclone by the
+  // positions and forecast track given. With a single position there is no track yet, so that position is matched instead.
+  const limit = +$("shapeLimit").value;
+  // Fair test: a selected past cyclone is cut off at the chosen moment (plus the forecast track, if one is given), and
+  // is then treated like a cyclone that was entered. Its later track is still drawn, to judge the matches against.
+  const fair = Boolean(own) && $("upto").checked, whole = Boolean(own) && !fair;
+  allowLater = Boolean(own) && $("later").checked; selfIndex = own ? loaded[0] : -1;
+  let path = mode === "strength" ? null : whole ? own.fixes.map(f => [f[1], f[2], f[4]])
+           : (fair ? own.fixes.filter(f => f[0] <= hour).map(f => [f[1], f[2], f[4]])
+                   : fixes.filter(f => !Number.isNaN(f[0])).map(f => [f[0], f[1], f[3]])).concat(forecast.filter(Boolean).map(f => [f[0], f[1], NaN]));
+  const onePosition = path !== null && path.length < 2;
+  if (onePosition) path = null;
+  const paths = path ? searchPaths(path, whole, fixes[3][0], fixes[3][1], hour, limit) : null;
+  let found = paths ? paths.found : search(fixes, hour, forecast, mode);
+  pathMode = Boolean(path);
+  if (path && !found.length) {
+    $("message").textContent = "No earlier cyclone follows that track closely enough in direction. Allow a larger difference in direction.";
+    $("results").style.display = "none"; return;
+  }
+  // then strength: the top tracks are put in order of how alike their strength was along the way
+  let ranked = false;
+  if (path && mode === "both") {
+    const points = whole || fair ? steps(path) : path.map(p => [p[0], p[1], 0, p[2]]), top = found.slice(0, TOP);
+    top.forEach(f => { const theirs = stormSteps[caseStorm[f[1]]];      // like the track, over the life of the shorter of two complete tracks
+      f[4] = whole && theirs.length < points.length ? windApart(theirs, points) : windApart(points, theirs); });
+    if (top[0][4] !== null) { top.sort((a, b) => a[4] - b[4]); found = top.concat(found.slice(TOP)); ranked = true; }
+  }
+  const apart = new Map(path ? found.map(f => [f[1], f]) : []);        // per matching case: [, , km between the tracks, degrees, km/h]
+  if (!path && found.length < TOP) {
+    $("message").textContent = "Too few earlier cyclones to compare with for that date and forecast.";
+    $("results").style.display = "none"; return;
+  }
+  const matches = [], seen = new Set();
+  for (const [, c] of found) {
+    if (!seen.has(caseStorm[c])) { seen.add(caseStorm[c]); matches.push(c); if (matches.length === TOP) break; }
+  }
+  hiddenMatches.clear();                                               // a new search draws every cyclone found
+  const nearest = found.slice(0, TOP).map(f => f[1]);
+  const now = fixes[3], pos = f => `${f[0].toFixed(1)}°N ${f[1].toFixed(1)}°E`;
+  const later = (c, lead) => { const f = futureOf(c, lead); return f ? `${f[1].toFixed(1)}°N ${f[2].toFixed(1)}°E, ${f[4]} km/h` : "no longer a cyclone"; };
+  const usedLeads = mode === "strength" || path ? [] : LEADS.filter((lead, l) => forecast[l]);
+  // what was entered decides what is matched
+  const positions = fixes.filter(f => !Number.isNaN(f[0])).length, winds = fixes.filter(f => !Number.isNaN(f[3])).length;
+  const matchedOn = (mode === "strength" ? [] : [positions > 1 ? `the track so far (${positions} positions)` : "the latest position"])
+    .concat(winds && mode !== "track" ? [`intensity (${winds} wind value${winds > 1 ? "s" : ""})`] : [], ["time of year"],
+            usedLeads.length ? [`the forecast track (${usedLeads.map(l => "+" + l + " h").join(", ")})`] : []);
+  const missing = [].concat(winds || mode === "track" ? [] : ["wind"], positions > 1 || mode === "strength" ? [] : ["earlier positions"],
+                            usedLeads.length || mode === "strength" ? [] : ["forecast track"]);
+  const modeNote = mode === "track" ? "Strength is not matched. "
+                 : mode === "strength" ? "Strength only: position, movement and the forecast track are not matched, so these cyclones can be anywhere in the basin. " : "";
+  const earlier = [2, 1, 0].find(k => !Number.isNaN(fixes[k][0]));
+  const movingNow = earlier === undefined ? "–" : moving(fixes[earlier][0], fixes[earlier][1], now[0], now[1], 6 * (3 - earlier));
+  const windNow = Number.isNaN(now[3]) ? "–" : now[3].toFixed(0) + " km/h" + (estimated[3] ? " (est.)" : "");
+
+  $("summary").textContent = (path
+    ? (whole ? `Tracks first: the whole track of ${own.name} ${own.season} against the whole track of each past cyclone, over the life of the shorter of the two, so a longer or shorter lifespan does not count against a match`
+           : fair ? `Fair test: only the track of ${own.name} ${own.season} up to ${fmtDate(hour)} ${fmtHour(hour)}` +
+                    (forecast.some(Boolean) ? ", plus the forecast track entered," : "") + ` is compared, against the track of each past cyclone that passed along it`
+           : `Tracks first: the path entered (${path.length} positions, the forecast track included) against the track of each past cyclone that passed along it`) +
+      ` (how far apart they lie, how alike their directions of travel are, and the time of year). ` +
+      `Compared with ${(found.length + paths.dropped + paths.uneven).toLocaleString()} ` +
+      (allowLater ? "cyclones, earlier and later ones alike" : `past cyclones that ended before ${fmtDate(hour - BUFFER_HOURS)}`) +
+      (limit < 900 ? `; ${paths.dropped.toLocaleString()} were left out because their direction of travel differs by more than ${limit}° on average (a different shape: they recurve, loop or run another way)` : "") +
+      (paths.uneven ? `; ${paths.uneven.toLocaleString()} because one track is less than half as long as the other` : "") + ". " +
+      (ranked ? `Then strength: the ${Math.min(TOP, found.length)} closest tracks are listed in order of how alike their wind was along the track.`
+       : mode === "both" ? "No wind was entered, so the closest tracks are not put in order of strength." : "Strength is not compared.")
+    : (onePosition ? "Only one position was entered, so there is no track to compare yet: cyclones are matched on that position. Add earlier positions or a forecast track to compare tracks. " : "") +
+      `Matched on ${matchedOn.join(", ")}. ` + modeNote + (missing.length ? `Not entered, so not used: ${missing.join(", ")}. ` : "") +
+      `Searched ${found.length.toLocaleString()} past cases from ` + (allowLater ? "cyclones earlier and later than this one." : `cyclones that ended before ${fmtDate(hour - BUFFER_HOURS)}.`)) +
+    (estimated.some(Boolean) ? " Wind was estimated from central pressure where left blank." : "");
+  const ownName = own ? `${own.name} ${own.season} (selected)` : "This cyclone";
+  let html = "<thead><tr><th></th><th>Cyclone</th>" + (path ? "<th>Tracks apart, on average</th><th>Direction differs by</th>" + (ranked ? "<th>Wind differs by</th>" : "") + "<th>Nearest moment</th>" : "<th>Matching moment</th>") +
+             "<th>Position</th><th>Moving</th>" +
+             "<th>Wind</th><th>Pressure</th><th>Peak wind</th><th>Lowest pressure</th><th>24 h later</th>" +
+             "<th>48 h later</th><th>72 h later</th></tr></thead><tbody>";
+  html += `<tr><td><span class="swatch" style="background:var(--ink)"></span></td><td><b>${ownName}</b></td>` +
+          (path ? "<td>–</td><td>–</td>" + (ranked ? "<td>–</td>" : "") : "") + `<td>${fmtDate(hour)} ${fmtHour(hour)}</td><td>${pos(now)}</td>` +
+          `<td>${movingNow}</td><td>${windNow}</td>` +
+          `<td>${pressureGiven[3] ? now[2].toFixed(0) + " hPa" : "–"}</td><td>–</td><td>–</td>` +
+          forecast.map(f => `<td>${f ? pos(f) + " (forecast)" : "–"}</td>`).join("") + "</tr>";
+  matches.forEach((c, n) => {
+    const s = storms[caseStorm[c]], h = historyOf(caseStorm[c], caseFix[c]), f = h[3];
+    const peak = Math.max(...s.fixes.map(x => x[4])), lowest = Math.min(...s.fixes.map(x => x[3]));
+    html += `<tr data-k="${n}"${hiddenMatches.has(n) ? ' class="off"' : ""}><td><span class="swatch" style="background:${colourOf(n)}"></span></td>` +
+            `<td><b>${s.name} ${s.season}</b></td>` +
+            (path ? `<td>${apart.get(c)[2].toFixed(0)} km</td><td>${apart.get(c)[3].toFixed(0)}°</td>` +
+                    (ranked ? `<td>${apart.get(c)[4].toFixed(0)} km/h</td>` : "") : "") +
+            `<td>${fmtDate(caseHour[c])} ${fmtHour(caseHour[c])}</td><td>${pos(f)}</td>` +
+            `<td>${moving(h[2][0], h[2][1], f[0], f[1])}</td><td>${f[3]} km/h</td><td>${f[2]} hPa</td>` +
+            `<td>${peak} km/h</td><td>${lowest} hPa</td>` + LEADS.map(l => `<td>${later(c, l)}</td>`).join("") + "</tr>";
+  });
+  $("matches").innerHTML = html + "</tbody>";
+  syncRows();
+
+  // guidance from the ten nearest cases
+  const guide = GUIDE_LEADS.map(lead => {
+    let dLat = 0, dLon = 0, dWind = 0, n = 0;
+    for (const c of nearest) {
+      const f = futureOf(c, lead); if (!f) continue;
+      const base = storms[caseStorm[c]].fixes[caseFix[c]];
+      dLat += f[1] - base[1]; dLon += f[2] - base[2]; dWind += f[4] - base[4]; n++;
+    }
+    return n ? {lead, n, lat: now[0] + dLat / n, lon: now[1] + dLon / n, change: dWind / n,
+                wind: Number.isNaN(now[3]) ? null : Math.max(0, now[3] + dWind / n)} : {lead, n};
+  });
+  $("guidance").innerHTML = "<thead><tr><th>Lead time</th><th>Position</th><th>10-minute maximum wind</th>" +
+    "<th>Cases that lasted this long</th></tr></thead><tbody>" + guide.map(g => g.n
+      ? `<tr><td>+${g.lead} h (${fmtDate(hour + g.lead)} ${fmtHour(hour + g.lead)})</td><td>${g.lat.toFixed(1)}°N ${g.lon.toFixed(1)}°E</td>` +
+        `<td>${g.wind === null ? (g.change > 0 ? "+" : "") + g.change.toFixed(0) + " km/h change (wind not entered)" : g.wind.toFixed(0) + " km/h"}</td>` +
+        `<td>${g.n} of ${nearest.length}</td></tr>`
+      : `<tr><td>+${g.lead} h</td><td colspan="3">None of the cases lasted this long</td></tr>`).join("") + "</tbody>";
+
+  // for a selected past cyclone, its whole actual track is drawn too
+  resetZoom("map");
+  drawMap(fixes, matches, guide.filter(g => g.n), forecast, own);
+  lastQuery = {lat: now[0], lon: now[1], wind: now[3], hour};
+  renderOutlook();
+  $("results").style.display = "block";
+}
+
+// ---- outlines of the ticked PAGASA areas, each labelled inside its north-east corner
+// ---- PAGASA's symbols for the strength of a cyclone, as in the legend of its track and intensity forecast map:
+// a disc lettered D (tropical depression), S (tropical storm) or T (typhoon); the cyclone sign, open for a severe
+// tropical storm and filled for a super typhoon
+const SYMBOLS = [["D", "Tropical depression", "61 km/h or less"], ["S", "Tropical storm", "62–88 km/h"],
+                 ["STS", "Severe tropical storm", "89–117 km/h"], ["T", "Typhoon", "118–184 km/h"],
+                 ["STY", "Super typhoon", "185 km/h or more"]];
+function strengthOf(wind) { return wind >= 185 ? 4 : wind >= 118 ? 3 : wind >= 89 ? 2 : wind >= 62 ? 1 : 0; }
+function strengthSymbol(cx, cy, wind, colour, r, title) {
+  const kind = SYMBOLS[strengthOf(wind)][0], n = v => (v * r).toFixed(1);
+  let g = `<g transform="translate(${cx.toFixed(1)} ${cy.toFixed(1)})">` + (title ? `<title>${title}</title>` : "");
+  if (kind === "STS" || kind === "STY") {  // a tail from the top sweeping right and one from the bottom sweeping left
+    const arm = `M${n(-0.25)} ${n(-0.97)}C${n(0.45)} ${n(-1.12)} ${n(1.0)} ${n(-1.45)} ${n(1.3)} ${n(-1.95)}` +
+                `C${n(1.4)} ${n(-1.3)} ${n(1.2)} ${n(-0.75)} ${n(0.8)} ${n(-0.45)}Z`;
+    const arms = `<path d="${arm}"/><path d="${arm}" transform="rotate(180)"/>`;
+    g += `<g fill="var(--surface)" stroke="var(--surface)" stroke-width="2.4" stroke-linejoin="round">${arms}<circle r="${r}"/></g>` +
+         `<g fill="${colour}">${arms}</g>` +
+         `<circle r="${n(0.87)}" fill="${kind === "STY" ? colour : "var(--surface)"}" stroke="${colour}" stroke-width="${n(0.26)}"/>`;
+  } else
+    g += `<circle r="${r}" fill="${colour}" stroke="var(--surface)" stroke-width="1.2"/>` +
+         `<text text-anchor="middle" y="${n(0.47)}" font-size="${n(1.35)}" font-weight="700" font-family="Arial, Helvetica, sans-serif" fill="var(--surface)">${kind}</text>`;
+  return g + "</g>";
+}
+function syncSymbols() {
+  document.querySelectorAll(".symToggle").forEach(box => box.checked = showSymbols);
+  document.querySelectorAll(".keyToggle").forEach(box => { box.checked = showKey; box.disabled = !showSymbols; });   // nothing to explain without symbols
+}
+// the strength legend, drawn inside a map at its top right
+function strengthKey() {
+  if (!showSymbols || !showKey) return "";
+  const W = 250, X = 1000 - W - 10, Y = 10, sample = [40, 70, 100, 150, 200];
+  let g = `<g pointer-events="none"><rect x="${X}" y="${Y}" width="${W}" height="${32 + SYMBOLS.length * 24}" rx="8" fill="var(--panel)" ` +
+          `fill-opacity="0.94" stroke="var(--axis)"/>` +
+          `<text x="${X + 12}" y="${Y + 20}" font-size="12.5" font-weight="700" fill="var(--ink)">Strength (10-minute wind, km/h)</text>`;
+  SYMBOLS.forEach((s, i) => { const y = Y + 43 + i * 24;
+    g += strengthSymbol(X + 24, y, sample[i], "var(--ink)", 7) +
+         `<text x="${X + 46}" y="${y + 4.5}" font-size="12.5" fill="var(--ink)">${s[1]} (${s[2].replace(" km/h", "")})</text>`; });
+  return g + "</g>";
+}
+syncSymbols();
+
+// ---- the legend panel at the right of each map: everything that is drawn at the moment, and nothing else
+const keyLine = (colour, width, dash) => `<svg viewBox="-17 -12 34 24" aria-hidden="true"><line x1="-15" x2="15" stroke="${colour}" ` +
+  `stroke-width="${width}" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ""}/></svg>`;
+const keyMark = inner => `<svg viewBox="-17 -12 34 24" aria-hidden="true">${inner}</svg>`;
+const keyDot = (colour, r) => keyMark(`<circle r="${r}" fill="${colour}" stroke="var(--surface)" stroke-width="1.5"/>`);
+function keyStar(R, r) {
+  let d = "";
+  for (let i = 0; i < 10; i++) { const q = i % 2 ? r : R, a = Math.PI * i / 5 - Math.PI / 2;
+    d += (i ? "L" : "M") + (q * Math.cos(a)).toFixed(1) + " " + (q * Math.sin(a)).toFixed(1); }
+  return keyMark(`<path d="${d}Z" fill="var(--ink)" stroke="var(--surface)" stroke-width="1"/>`);
+}
+function areaKeys() {                      // outlines of the ticked areas, the same on both maps
+  const areas = AREAS.filter(a => shown[a.key]);
+  return areas.length ? [["Areas", areas.map(a => [keyLine("var(--ink-2)", 1.8, a.dash), `${a.key} (${a.title})`])]] : [];
+}
+// hours between the marks along a track: strength symbols and dates come every 12 hours (00 and 12Z) by themselves;
+// the position boxes add the coordinates, every 12 or every 6 hours
+function markStep() { return fixStep === 6 ? 6 : fixStep === 12 || showSymbols || showTimes ? 12 : 0; }
+function fixKey(colour) {
+  const step = markStep(), notes = (showTimes ? ["date and time (UTC)"] : []).concat(fixStep ? ["coordinates"] : []);
+  const mark = !showSymbols ? "Small dot" : step === 6 ? "Small symbol (every 12 hours) or dot" : "Small symbol";
+  return [showSymbols ? keyMark(strengthSymbol(0, 0, 150, colour, 4)) : keyDot(colour, 3.2),
+    `${mark}: ${showSymbols ? "strength and position" : "position"} every ${step} hours (${step === 6 ? "00, 06, 12, 18Z" : "00 and 12Z"})` +
+    (notes.length ? `, with ${notes.join(" and ")} where there is room` : "")];
+}
+function fillLegend(id, groups) {
+  $(id).innerHTML = groups.map(g => `<div class="group"><b>${g[0]}</b>` +
+    g[1].map(k => { const tag = k[0].startsWith("<input") ? "label" : "span";   // an entry with a tick box is all clickable
+      if (k[0].startsWith("<button")) return k[0];
+      return `<${tag} class="item">${k[0]}<span>${k[1]}</span></${tag}>`; }).join("") + `</div>`).join("");
+}
+function syncRows() {                      // a cyclone unticked in the legend has its table row greyed
+  document.querySelectorAll("#matches tr[data-k]").forEach(tr => tr.classList.toggle("off", hiddenMatches.has(+tr.dataset.k)));
+}
+// ticking or unticking a similar cyclone puts it on or takes it off the map and greys its row in the table;
+// a zoomed-in view stays where it is
+$("legend").addEventListener("change", event => {
+  const box = event.target.closest(".matchToggle"); if (!box) return;
+  const k = +box.dataset.k;
+  if (box.checked) hiddenMatches.delete(k); else hiddenMatches.add(k);
+  syncRows();
+  if (ZOOM.map.k <= 1.001) mapFrame = null;                            // at the whole view the map fits the cyclones now shown
+  if (lastMap) drawMap(...lastMap);
+});
+
+// ---- the marks along a track, every 12 or 6 hours (see markStep). With the PAGASA symbols on, every 12-hourly
+// position shows its strength; the date and time and the coordinates are written beside the marks that have room.
+// The moment in `big` already carries a large symbol, so it gets no mark of its own.
+function fixDots(fixes, x, y, colour, name, taken, big) {
+  const step = markStep();
+  let svg = "", last = null;                // last: the previous strength symbol on this track
+  for (const f of fixes) {
+    if (f[0] % step) continue;             // hours are counted from a 0000Z, so this keeps 00 and 12Z, or all four synoptic hours
+    const px = x(f[2]), py = y(f[1]);
+    if (px < 0 || px > 1000 || py < 0 || py > 600) continue;
+    const where = `${f[1].toFixed(1)}°N ${f[2].toFixed(1)}°E`, when = `${fmtDate(f[0]).slice(0, 6)} ${fmtHour(f[0]).slice(0, 2)}Z`;
+    const title = `${name}, ${fmtDate(f[0])} ${fmtHour(f[0])}: ${where}, ${f[4]} km/h (${SYMBOLS[strengthOf(f[4])][1].toLowerCase()})`;
+    const lines = (showTimes ? [when] : []).concat(fixStep ? [where] : []);
+    const room = lines.length > 0 && px <= (fixStep ? 905 : 925) &&
+      !taken.some(t => Math.abs(t[0] - px) < (fixStep ? 100 : 80) && Math.abs(t[1] - py) < 14 * lines.length + (showSymbols ? 7 : 1));
+    // a strength symbol at every 12-hourly position unless it would sit on the one before, and wherever a label is written
+    const symbol = showSymbols && (room || (f[0] % 12 === 0 && (!last || Math.hypot(last[0] - px, last[1] - py) > 8)));
+    if (f[0] !== big) {
+      svg += symbol ? strengthSymbol(px, py, f[4], colour, 4, title)
+           : `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="3.2" fill="${colour}" stroke="var(--surface)" stroke-width="1"><title>${title}</title></circle>`;
+      if (symbol) last = [px, py];
+    } else last = [px, py];
+    if (!room) continue;
+    taken.push([px, py]);
+    lines.forEach((line, i) => svg += `<text x="${(px + (showSymbols ? 8 : 7)).toFixed(1)}" y="${(py + 14 + 13 * i).toFixed(1)}" font-size="11.5" ` +
+      `fill="var(--ink)" stroke="var(--sea)" stroke-width="3" paint-order="stroke" stroke-linejoin="round">${line}</text>`);
+  }
+  return svg;
+}
+function areaPoints() {                    // corners of the ticked areas, so that a map widens to take them in
+  return AREAS.filter(a => shown[a.key]).flatMap(a => a.corners);
+}
+function areasSvg(x, y, path) {
+  let svg = "";
+  const labels = [];
+  for (const a of AREAS) {
+    if (!shown[a.key]) continue;
+    const east = Math.max(...a.corners.map(c => c[0])), north = Math.max(...a.corners.map(c => c[1]));
+    // a corner beyond the edge of the map keeps its label at the edge; labels that would collide step down
+    const lx = Math.min(x(east), 1000) - 7;
+    let ly = Math.max(y(north), 0) + 18;
+    while (labels.some(l => Math.abs(l[0] - lx) < 60 && Math.abs(l[1] - ly) < 17)) ly += 18;
+    labels.push([lx, ly]);
+    svg += `<path d="${path(a.corners)}Z" fill="none" stroke="var(--ink-2)" stroke-width="1.8" stroke-dasharray="${a.dash}">` +
+           `<title>${a.title}</title></path>` +
+           `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="14" font-weight="600" text-anchor="end" fill="var(--ink-2)">${a.key}</text>`;
+  }
+  return svg;
+}
+
+// ---- intensification outlook: past cyclones in the same place (and, optionally, at the same strength and time of
+// year), whatever their track. Only winds recorded by JMA are used (1977 onward), one moment per past cyclone.
+let lastQuery = null;
+const CHANGE = 15;                    // km/h: at least this much counts as intensified or weakened
+const OUTLOOK_LEADS = [6, 12, 18, 24, 30, 36, 42, 48];                 // every record of the 6-hourly best track, to two days
+function renderOutlook() {
+  if (!lastQuery) return;
+  const {lat, lon, wind, hour} = lastQuery;
+  const windKnown = !Number.isNaN(wind);
+  $("oStrength").disabled = !windKnown;                                // strength cannot be matched without a wind
+  const radius = +$("oRadius").value, sameStrength = windKnown && $("oStrength").checked, sameSeason = $("oSeason").checked;
+  const dayOf = h => dayAngle(h) / (2 * Math.PI) * 365.25, today = dayOf(hour);
+  const used = [];
+  storms.forEach((s, si) => {
+    if (!usable(si, hour)) return;                                     // normally only cyclones that had already ended
+    let best = null;
+    for (const f of s.fixes) {
+      if (f[5] !== 1) continue;                                        // recorded wind only
+      if (sameStrength && Math.abs(f[4] - wind) > 10) continue;
+      if (sameSeason) { const gap = Math.abs(dayOf(f[0]) - today); if (Math.min(gap, 365.25 - gap) > 30) continue; }
+      const km = distanceKm(lat, lon, f[1], f[2]);
+      if (km > radius) continue;
+      const after = OUTLOOK_LEADS.map(lead => { const g = s.fixes[s.index.get(f[0] + lead)]; return g && g[5] === 1 ? g[4] - f[4] : null; });
+      if (after[OUTLOOK_LEADS.indexOf(24)] === null) continue;         // needs a recorded wind 24 hours later
+      if (!best || km < best.km) best = {s, f, km, after};
+    }
+    if (best) used.push(best);
+  });
+  used.sort((a, b) => a.km - b.km);
+  const conditions = [`within ${radius} km`].concat(sameStrength ? [`at ${Math.max(0, wind - 10).toFixed(0)}–${(wind + 10).toFixed(0)} km/h`] : [],
+                                                   sameSeason ? ["within 30 days of this date"] : []);
+  $("oSummary").textContent = `${used.length} past cyclones were ${conditions.join(", ")} and have a recorded wind 24 hours later.` +
+    (windKnown ? "" : " No wind was entered, so strength is not used; this is place" + (sameSeason ? " and time of year" : "") + " only.") +
+    (used.length < 5 ? " That is too few to rely on: widen the distance or switch off a condition." : "");
+  const quantile = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))))];
+  const signed = v => (v > 0 ? "+" : "") + v.toFixed(0);
+  let html = "<thead><tr><th>After</th><th>Past cyclones</th><th>Intensified / steady / weakened</th><th>Intensified</th>" +
+             "<th>Steady</th><th>Weakened</th><th>Typical change</th><th>8 in 10 were between</th></tr></thead><tbody>";
+  OUTLOOK_LEADS.forEach((lead, l) => {
+    const changes = used.map(u => u.after[l]).filter(v => v !== null).sort((a, b) => a - b), n = changes.length;
+    if (!n) { html += `<tr><td>${lead} hours</td><td>0</td><td colspan="6">No past cyclone lasted this long</td></tr>`; return; }
+    const up = changes.filter(v => v >= CHANGE).length, down = changes.filter(v => v <= -CHANGE).length, flat = n - up - down;
+    const pct = v => Math.round(100 * v / n) + "%";
+    html += `<tr><td>${lead} hours</td><td>${n}</td>` +
+      `<td><div class="bar" role="img" aria-label="${pct(up)} intensified, ${pct(flat)} steady, ${pct(down)} weakened">` +
+      `<i class="up" style="width:${100 * up / n}%"></i><i class="flat" style="width:${100 * flat / n}%"></i>` +
+      `<i class="down" style="width:${100 * down / n}%"></i></div></td>` +
+      `<td>${up} (${pct(up)})</td><td>${flat} (${pct(flat)})</td><td>${down} (${pct(down)})</td>` +
+      `<td>${signed(quantile(changes, 0.5))} km/h</td><td>${signed(quantile(changes, 0.1))} and ${signed(quantile(changes, 0.9))} km/h</td></tr>`;
+  });
+  $("outlook").innerHTML = html + `</tbody><caption style="caption-side:bottom;text-align:left;padding-top:6px" class="small">` +
+    `<span class="key up" style="margin-left:0"></span>intensified by ${CHANGE} km/h or more<span class="key flat"></span>steady` +
+    `<span class="key down"></span>weakened by ${CHANGE} km/h or more</caption>`;
+  $("oList").innerHTML = "<thead><tr><th>Cyclone</th><th>When</th><th>Distance</th><th>Wind then</th>" +
+    OUTLOOK_LEADS.map(lead => `<th>+${lead} h</th>`).join("") + "</tr></thead><tbody>" + used.map(u =>
+      `<tr><td>${u.s.name} ${u.s.season}</td><td>${fmtDate(u.f[0])} ${fmtHour(u.f[0])}</td><td>${u.km.toFixed(0)} km</td>` +
+      `<td>${u.f[4]} km/h</td>` + u.after.map(v => `<td>${v === null ? "–" : signed(v)}</td>`).join("") + "</tr>").join("") +
+    `</tbody><caption style="caption-side:bottom;text-align:left;padding-top:6px" class="small">Change in wind from that moment, in km/h.</caption>`;
+}
+["oRadius", "oStrength", "oSeason"].forEach(id => $(id).addEventListener("change", renderOutlook));
+
+function drawMap(fixes, matches, guide, forecast, own) {
+  lastMap = [fixes, matches, guide, forecast, own];
+  // frame the map on everything drawn, keeping a 5:3 shape
+  const entered = forecast.map((f, l) => f && {lead: LEADS[l], lat: f[0], lon: f[1]}).filter(Boolean);
+  const drawn = fixes.filter(f => !Number.isNaN(f[0]));               // the positions that were entered
+  const pts = drawn.map(f => [f[1], f[0]]).concat(guide.map(g => [g.lon, g.lat]), entered.map(g => [g.lon, g.lat]));
+  matches.forEach((c, k) => { if (!hiddenMatches.has(k)) storms[caseStorm[c]].fixes.forEach(f => pts.push([f[2], f[1]])); });
+  if (own) own.fixes.forEach(f => pts.push([f[2], f[1]]));
+  pts.push(...areaPoints());                                           // a ticked area is shown whole
+  let w, e, s, n;
+  if (!mapFrame) {
+    w = Math.min(...pts.map(p => p[0])) - 4; e = Math.max(...pts.map(p => p[0])) + 4;
+    s = Math.min(...pts.map(p => p[1])) - 3; n = Math.max(...pts.map(p => p[1])) + 3;
+    if ((e - w) / (n - s) < 5 / 3) { const grow = (n - s) * 5 / 3 - (e - w); w -= grow / 2; e += grow / 2; }
+    else { const grow = (e - w) * 3 / 5 - (n - s); s -= grow / 2; n += grow / 2; }
+    mapFrame = [w, e, s, n];
+  }
+  [w, e, s, n] = zoomFrame("map", ...mapFrame);
+  const x = lon => (lon - w) / (e - w) * 1000, y = lat => (n - lat) / (n - s) * 600;
+  const path = points => points.map((p, i) => (i ? "L" : "M") + x(p[0]).toFixed(1) + " " + y(p[1]).toFixed(1)).join("");
+  let svg = "";
+  const step = gridStep(e - w);
+  for (let lon = Math.ceil(w / step) * step; lon < e; lon += step)
+    svg += `<line x1="${x(lon)}" x2="${x(lon)}" y1="0" y2="600" stroke="var(--line)"/>` +
+           `<text x="${x(lon) + 4}" y="594" font-size="13" fill="var(--muted)">${lon}°E</text>`;
+  for (let lat = Math.ceil(s / step) * step; lat < n; lat += step)
+    svg += `<line y1="${y(lat)}" y2="${y(lat)}" x1="0" x2="1000" stroke="var(--line)"/>` +
+           `<text x="4" y="${y(lat) - 4}" font-size="13" fill="var(--muted)">${lat < 0 ? -lat + "°S" : lat + "°N"}</text>`;
+  for (const line of DATA.coast) svg += `<path d="${path(line)}" fill="none" stroke="var(--muted)" stroke-width="1"/>`;
+  svg += areasSvg(x, y, path);
+  matches.forEach((c, k) => {
+    if (hiddenMatches.has(k)) return;                                  // unticked in the legend
+    const st = storms[caseStorm[c]], at = st.fixes[caseFix[c]];
+    svg += `<path d="${path(st.fixes.map(f => [f[2], f[1]]))}" fill="none" stroke="${colourOf(k)}" stroke-width="2.4" ${dashOf(k) ? `stroke-dasharray="${dashOf(k)}" ` : ""}` +
+           `stroke-linejoin="round"><title>${st.name} ${st.season}</title></path>` +
+           (showSymbols ? `<circle cx="${x(at[2])}" cy="${y(at[1])}" r="8" fill="none" stroke="${colourOf(k)}" stroke-width="1.6"/>` +   // ringed, since all track symbols are one size
+                          strengthSymbol(x(at[2]), y(at[1]), at[4], colourOf(k), 4, `${st.name} ${st.season}, matching moment: ${at[4]} km/h`)
+            : `<circle cx="${x(at[2])}" cy="${y(at[1])}" r="6" fill="${colourOf(k)}" stroke="var(--surface)" stroke-width="2">` +
+              `<title>${st.name} ${st.season}, matching moment</title></circle>`);
+  });
+  const here = [fixes[3][1], fixes[3][0]];
+  if (guide.length) {
+    svg += `<path d="${path([here].concat(guide.map(p => [p.lon, p.lat])))}" fill="none" stroke="var(--ink-2)" stroke-width="2" stroke-dasharray="6 5"/>`;
+    guide.filter(p => p.lead % 24 === 0).forEach(p => svg += showSymbols && p.wind !== null
+      ? strengthSymbol(x(p.lon), y(p.lat), p.wind, "var(--ink-2)", 4, `Most similar cases, +${p.lead} h: ${p.wind.toFixed(0)} km/h`)
+      : `<circle cx="${x(p.lon)}" cy="${y(p.lat)}" r="5" fill="var(--surface)" stroke="var(--ink-2)" stroke-width="2">` +
+        `<title>Most similar cases, +${p.lead} h</title></circle>`);
+  }
+  if (entered.length) {
+    svg += `<path d="${path([here].concat(entered.map(p => [p.lon, p.lat])))}" fill="none" stroke="var(--ink)" stroke-width="2.5" stroke-dasharray="2 5" stroke-linecap="round"/>`;
+    entered.forEach(p => svg += `<rect x="${x(p.lon) - 5}" y="${y(p.lat) - 5}" width="10" height="10" fill="var(--ink)" stroke="var(--surface)" stroke-width="1.5">` +
+      `<title>Forecast track, +${p.lead} h</title></rect>` +
+      `<text x="${x(p.lon) + 9}" y="${y(p.lat) - 7}" font-size="13" font-weight="600" fill="var(--ink)">+${p.lead} h</text>`);
+  }
+  if (own) svg += `<path d="${path(own.fixes.map(f => [f[2], f[1]]))}" fill="none" stroke="var(--ink)" stroke-width="2" ` +
+                  `stroke-linejoin="round"><title>${own.name} ${own.season}, actual track</title></path>`;
+  svg += `<path d="${path(drawn.map(f => [f[1], f[0]]))}" fill="none" stroke="var(--ink)" stroke-width="5" stroke-linecap="round"/>`;
+  if (markStep()) {
+    const taken = [];
+    if (own) svg += fixDots(own.fixes, x, y, "var(--ink)", `${own.name} ${own.season}`, taken, null);
+    matches.forEach((c, k) => { if (hiddenMatches.has(k)) return; const st = storms[caseStorm[c]];
+      svg += fixDots(st.fixes, x, y, colourOf(k), `${st.name} ${st.season}`, taken, caseHour[c]); });
+  }
+  const cx = x(here[0]), cy = y(here[1]);
+  let star = "";
+  for (let i = 0; i < 10; i++) { const r = i % 2 ? 5 : 12, a = Math.PI * i / 5 - Math.PI / 2;
+    star += (i ? "L" : "M") + (cx + r * Math.cos(a)).toFixed(1) + " " + (cy + r * Math.sin(a)).toFixed(1); }
+  const windNow = fixes[3][3];
+  svg += showSymbols && !Number.isNaN(windNow)
+    ? strengthSymbol(cx, cy, windNow, "var(--ink)", 7, `This cyclone, latest fix: ${windNow.toFixed(0)} km/h`)
+    : `<path d="${star}Z" fill="var(--ink)" stroke="var(--surface)" stroke-width="1.5"><title>This cyclone, latest fix</title></path>`;
+  $("map").innerHTML = svg + strengthKey();
+  const symbolNow = showSymbols && !Number.isNaN(windNow), what = own ? `${own.name} ${own.season}` : "This cyclone";
+  const now = [[keyLine("var(--ink)", 5), "Positions entered"]];
+  if (own) now.push([keyLine("var(--ink)", 2), "Its whole actual track"]);
+  now.push(symbolNow ? [keyMark(strengthSymbol(0, 0, windNow, "var(--ink)", 7)), "Latest position (largest symbol)"]
+                     : [keyStar(10, 4.2), "Latest position"]);
+  if (entered.length) now.push([keyMark(`<line x1="-15" x2="15" stroke="var(--ink)" stroke-width="2.5" stroke-dasharray="2 5" stroke-linecap="round"/>` +
+    `<rect x="-4.5" y="-4.5" width="9" height="9" fill="var(--ink)" stroke="var(--surface)" stroke-width="1.2"/>`),
+    `Forecast track entered (squares: ${entered.map(p => "+" + p.lead).join(", ")} h)`]);
+  if (guide.length) now.push([keyMark(`<line x1="-15" x2="15" stroke="var(--ink-2)" stroke-width="2" stroke-dasharray="6 5"/>` +
+    (showSymbols && guide[0].wind !== null ? "" : `<circle r="4.5" fill="var(--surface)" stroke="var(--ink-2)" stroke-width="2"/>`)),
+    `What the ${TOP} most similar cases did next (${showSymbols && guide[0].wind !== null ? "grey symbols" : "open circles"}: +24, +48, +72 h)`]);
+  const entry = (c, k) => [`<input type="checkbox" class="matchToggle" data-k="${k}"${hiddenMatches.has(k) ? "" : " checked"}>` +
+    keyLine(colourOf(k), 2.4, dashOf(k)), `${storms[caseStorm[c]].name} ${storms[caseStorm[c]].season}`];
+  const past = matches.map(entry);
+  past.push(showSymbols ? [keyMark(`<circle r="8" fill="none" stroke="var(--muted)" stroke-width="1.6"/>` + strengthSymbol(0, 0, 150, "var(--muted)", 4)), `Ringed symbol: ${pathMode ? "the moment nearest to this cyclone's latest position" : "the matching moment"}`]
+                        : [keyDot("var(--muted)", 5.5), `Large dot: ${pathMode ? "the moment nearest to this cyclone's latest position" : "the matching moment"}`]);
+  if (markStep()) past.push(fixKey("var(--muted)"));
+  fillLegend("legend", [[what, now], ["Similar past cyclones (untick to hide)", past]].concat(areaKeys()));
+}
+</script>
+</body>
+</html>
