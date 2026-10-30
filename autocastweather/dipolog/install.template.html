@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dipolog Forecast Bookmark</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--ink:#1c1f24;--muted:#5b6573;--line:#d5dbe3;--accent:#0b5cad}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 -apple-system,Segoe UI,Roboto,Arial,sans-serif}
+main{max-width:640px;margin:40px auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:24px;margin-bottom:16px}
+h1{font-size:22px;margin:0 0 6px}p{margin:8px 0}.muted{color:var(--muted);font-size:14px}
+.bm{display:inline-block;margin:14px 0;padding:12px 20px;border-radius:10px;background:var(--accent);color:#fff;font-weight:700;text-decoration:none;cursor:grab}
+button{font:inherit;font-weight:600;padding:9px 16px;border-radius:9px;border:1px solid var(--accent);background:#fff;color:var(--accent);cursor:pointer}
+ol{padding-left:20px}li{margin:6px 0}code{background:#eef1f5;padding:1px 5px;border-radius:4px}
+</style></head><body><main>
+<div class="card">
+<h1>Dipolog Localized 24-Hour Forecast bookmark</h1>
+<p class="muted">Writes the localized forecast post for Zamboanga Peninsula and Misamis Occidental (English and Cebuano) from PAGASA Mindanao's latest regional forecast, with astronomical information over Dipolog City.</p>
+<a class="bm" href="{{URL}}" onclick="alert('Drag this button to your bookmarks bar instead of clicking it.');return false">⛅ DIP Forecast</a>
+<p><b>Install:</b> drag the blue button onto Chrome's bookmarks bar.<br>
+<span class="muted">Bookmarks bar hidden? Press <code>⌘ Shift B</code>.</span></p>
+<p class="muted">If dragging doesn't work: <button id="copy">Copy bookmark link</button> then right-click the bookmarks bar → <b>Add page…</b>, name it <i>DIP Forecast</i>, and paste into the URL box.</p>
+</div>
+<div class="card">
+<b>Use</b>
+<ol>
+<li>Open <code>pagasa.dost.gov.ph</code> (any PAGASA page). Click the bookmark anywhere else and it offers to take you there.</li>
+<li>Click <b>DIP Forecast</b>. A panel opens with the post text and the satellite GIF.</li>
+<li>Check the text (edit it in the box if needed), then <b>Copy text</b> and paste into your Facebook post.</li>
+<li>To attach the satellite animation: <b>Open GIF to save</b>, right-click it → <b>Save Image As…</b>, and add that file to the post.</li>
+</ol>
+<p class="muted">Fill in the heat index blanks from your local records before posting. If any Cebuano wording could not be translated it stays in English and the panel shows a red warning. Rise and set times are calculated for Dipolog City.</p>
+</div>
+</main>
+<script>
+document.getElementById('copy').onclick=async function(){await navigator.clipboard.writeText(document.querySelector('.bm').getAttribute('href'));this.textContent='Copied ✓'};
+</script>
+</body></html>
