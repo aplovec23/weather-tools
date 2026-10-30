@@ -1,0 +1,872 @@
+{
+"5": [
+7.6022,
+125.9688,
+"Nabunturan, Davao de Oro, Davao Region, 8800, Philippines"
+],
+"7": [
+14.0263,
+121.5918,
+"Tayabas, Quezon, Calabarzon, 4327, Philippines"
+],
+"8": [
+14.6451,
+121.0443,
+"manual"
+],
+"10": [
+17.0629,
+122.4293,
+"Palanan, Isabela, Cagayan Valley, 3334, Philippines"
+],
+"11": [
+20.7878,
+121.8415,
+"Itbayat, Batanes, Cagayan Valley, 3905, Philippines"
+],
+"12": [
+16.9118,
+121.0614,
+"Banaue, Ifugao, Cordillera Administrative Region, 3601, Philippines"
+],
+"16": [
+16.7976,
+121.1235,
+"Lagawe, Ifugao, Cordillera Administrative Region, 3600, Philippines"
+],
+"156": [
+12.354,
+121.0675,
+"San Jose, Occidental Mindoro, Mimaropa, 5100, Philippines"
+],
+"157": [
+13.3204,
+122.086,
+"Torrijos, 2nd District, Marinduque, Mimaropa, 4903, Philippines"
+],
+"158": [
+12.5771,
+122.2694,
+"Romblon, Mimaropa, 5500, Philippines"
+],
+"159": [
+11.2504,
+123.9991,
+"Daanbantayan, Cebu, Central Visayas, 6013, Philippines"
+],
+"160": [
+9.707,
+124.1044,
+"Bilar, Bohol, Central Visayas, Philippines"
+],
+"161": [
+11.608,
+125.4322,
+"Borongan, Eastern Samar, Eastern Visayas, 6800, Philippines"
+],
+"162": [
+9.2156,
+123.5138,
+"Siquijor, Negros Island Region, 6225, Philippines"
+],
+"163": [
+6.4438,
+124.9269,
+"Tampakan, South Cotabato, Soccsksargen, 9507, Philippines"
+],
+"164": [
+7.0096,
+125.0905,
+"Kidapawan, Cotabato, Soccsksargen, 9400, Philippines"
+],
+"165": [
+8.147,
+123.846,
+"Ozamiz, Misamis Occidental, Northern Mindanao, 7200, Philippines"
+],
+"166": [
+11.0634,
+125.0376,
+"Tolosa, 1st District, Leyte, Eastern Visayas, 6503, Philippines"
+],
+"167": [
+18.1954,
+120.5927,
+"Laoag, Brgy. 13, Ilocos Norte, Ilocos Region, 2900, Philippines"
+],
+"168": [
+11.0724,
+122.6559,
+"San Enrique, Iloilo, Western Visayas, 5036, Philippines"
+],
+"169": [
+14.1123,
+122.9557,
+"Daet, Camarines Norte, Bicol Region, 4600, Philippines"
+],
+"170": [
+11.0307,
+125.7237,
+"Guiuan, Eastern Samar, Eastern Visayas, 6808, Philippines"
+],
+"171": [
+15.7591,
+121.5627,
+"Baler, Aurora, Central Luzon, 3200, Philippines"
+],
+"172": [
+18.0547,
+120.5645,
+"Batac, Ilocos Norte, Ilocos Region, 2906, Philippines"
+],
+"173": [
+17.8657,
+120.4572,
+"Sinait, Ilocos Sur, Ilocos Region, 2733, Philippines"
+],
+"174": [
+16.7203,
+120.3526,
+"Bacnotan, La Union, Ilocos Region, 2525, Philippines"
+],
+"175": [
+16.4498,
+120.5901,
+"La Trinidad, Benguet, Cordillera Administrative Region, 2601, Philippines"
+],
+"176": [
+16.6275,
+120.7668,
+"Atok, Benguet, Cordillera Administrative Region, 2612, Philippines"
+],
+"177": [
+16.1157,
+119.799,
+"Agno, Pangasinan, Ilocos Region, 2408, Philippines"
+],
+"178": [
+14.9738,
+120.1563,
+"San Marcelino, Zambales, Central Luzon, 2207, Philippines"
+],
+"179": [
+18.2001,
+121.662,
+"Lal-lo, Cagayan, Cagayan Valley, 3509, Philippines"
+],
+"180": [
+17.6119,
+121.73,
+"Tuguegarao, Cagayan, Cagayan Valley, 3500, Philippines"
+],
+"181": [
+16.7054,
+121.6749,
+"Echague, Isabela, Cagayan Valley, 3309, Philippines"
+],
+"182": [
+16.4829,
+121.1505,
+"Bayombong, Nueva Vizcaya, Cagayan Valley, 3700, Philippines"
+],
+"183": [
+15.7135,
+120.9039,
+"Muñoz, Nueva Ecija, Central Luzon, Philippines"
+],
+"184": [
+15.0781,
+120.9398,
+"San Ildefonso, Bulacan, Central Luzon, 3010, Philippines"
+],
+"185": [
+15.6865,
+120.4147,
+"Camiling, Tarlac, Central Luzon, 2306, Philippines"
+],
+"186": [
+14.4985,
+121.2856,
+"Tanay, Rizal, Calabarzon, Philippines"
+],
+"187": [
+14.1791,
+121.2218,
+"Los Baños, Laguna, Calabarzon, Philippines"
+],
+"188": [
+14.1958,
+120.8785,
+"Indang, Cavite, Calabarzon, 4122, Philippines"
+],
+"189": [
+14.1058,
+122.0147,
+"Alabat, Quezon, Calabarzon, Philippines"
+],
+"190": [
+13.5562,
+123.2741,
+"Pili, Camarines Sur, Bicol Region, 4418, Philippines"
+],
+"191": [
+13.1905,
+123.5999,
+"Guinobatan, Albay, Bicol Region, 4503, Philippines"
+],
+"192": [
+13.5804,
+124.2312,
+"Virac, Catanduanes, Bicol Region, 4800, Philippines"
+],
+"193": [
+13.3593,
+123.7302,
+"Tabaco, Albay, Bicol Region, 4511, Philippines"
+],
+"194": [
+12.9711,
+124.0015,
+"Sorsogon City, Sorsogon, Bicol Region, 4700, Philippines"
+],
+"195": [
+12.3867,
+125.3015,
+"Gamay, Northern Samar, Eastern Visayas, Philippines"
+],
+"196": [
+10.6778,
+124.7978,
+"Baybay, 5th District, Leyte, Eastern Visayas, 6521, Philippines"
+],
+"197": [
+10.4269,
+122.9208,
+"La Carlota, Negros Occidental, Negros Island Region, 6130, Philippines"
+],
+"198": [
+10.8216,
+122.7124,
+"Dumangas, Iloilo, Western Visayas, 5006, Philippines"
+],
+"199": [
+11.4302,
+122.5971,
+"Mambusao, Capiz, Western Visayas, 5807, Philippines"
+],
+"200": [
+10.7889,
+122.0175,
+"Sibalom, Antique, Western Visayas, 5713, Philippines"
+],
+"201": [
+4.898,
+119.8218,
+"Simunul, Tawi-Tawi, Bangsamoro, 7505, Philippines"
+],
+"202": [
+9.4371,
+118.5484,
+"Aborlan, Palawan, Mimaropa, 5302, Philippines"
+],
+"203": [
+9.7826,
+126.1564,
+"General Luna, Surigao del Norte, Caraga, 8419, Philippines"
+],
+"204": [
+9.2457,
+124.7269,
+"Mambajao, Camiguin, Northern Mindanao, 9100, Philippines"
+],
+"205": [
+8.9975,
+124.8846,
+"Talisayan, Misamis Oriental, Northern Mindanao, 9012, Philippines"
+],
+"206": [
+8.9884,
+125.3408,
+"Nasipit, Agusan del Norte, Caraga, 8602, Philippines"
+],
+"207": [
+9.08,
+126.1975,
+"Tandag, Surigao del Sur, Caraga, 8300, Philippines"
+],
+"208": [
+6.9522,
+126.2167,
+"Mati, Davao Oriental, Davao Region, 8200, Philippines"
+],
+"209": [
+7.6022,
+125.9688,
+"Nabunturan, Davao de Oro, Davao Region, 8800, Philippines"
+],
+"210": [
+7.4471,
+125.8095,
+"Tagum, Davao del Norte, Davao Region, 8100, Philippines"
+],
+"211": [
+7.1083,
+124.8233,
+"Kabacan, Cotabato, Soccsksargen, 9407, Philippines"
+],
+"212": [
+6.6191,
+124.7489,
+"Tantangan, South Cotabato, Soccsksargen, 9510, Philippines"
+],
+"213": [
+7.9029,
+125.0898,
+"Valencia, Bukidnon, Northern Mindanao, 8709, Philippines"
+],
+"214": [
+6.7441,
+125.3555,
+"Digos, Davao del Sur, Davao Region, 8002, Philippines"
+],
+"215": [
+9.0538,
+125.5863,
+"Remedios T. Romualdez, Agusan del Norte, Caraga, 8611, Philippines"
+],
+"216": [
+11.5618,
+124.3965,
+"Naval, Biliran, Eastern Visayas, 6543, Philippines"
+],
+"217": [
+10.0084,
+125.5696,
+"San Jose, Dinagat Islands, Caraga, 8427, Philippines"
+],
+"218": [
+8.736,
+125.6015,
+"Las Nieves, Agusan del Norte, Caraga, 8610, Philippines"
+],
+"219": [
+11.4258,
+122.0561,
+"Culasi, Antique, Western Visayas, 5708, Philippines"
+],
+"220": [
+16.3403,
+121.6831,
+"Maddela, Quirino, Cagayan Valley, 3404, Philippines"
+],
+"221": [
+18.0246,
+121.1845,
+"Kabugao, Apayao, Cordillera Administrative Region, 3809, Philippines"
+],
+"222": [
+9.3662,
+122.8048,
+"Bayawan, Negros Oriental, Negros Island Region, 6221, Philippines"
+],
+"223": [
+12.5677,
+123.7337,
+"San Jacinto, Masbate, Bicol Region, 5417, Philippines"
+],
+"224": [
+11.7089,
+122.364,
+"Kalibo, Aklan, Western Visayas, 5600, Philippines"
+],
+"225": [
+10.394,
+125.2002,
+"Hinunangan, Southern Leyte, Eastern Visayas, 6608, Philippines"
+],
+"226": [
+8.2324,
+124.6031,
+"Talakag, Bukidnon, Northern Mindanao, 8708, Philippines"
+],
+"228": [
+20.449,
+121.9683,
+"Basco, Batanes, Cagayan Valley, 3900, Philippines"
+],
+"229": [
+20.7878,
+121.8415,
+"Itbayat, Batanes, Cagayan Valley, 3905, Philippines"
+],
+"230": [
+9.0341,
+117.6426,
+"Rizal, Palawan, Mimaropa, 5304, Philippines"
+],
+"231": [
+8.7736,
+117.839,
+"Brooke's Point, Palawan, Mimaropa, 5305, Philippines"
+],
+"232": [
+18.4573,
+122.1422,
+"Santa Ana, Cagayan, Cagayan Valley, 3514, Philippines"
+],
+"233": [
+18.3574,
+121.6375,
+"Aparri, Cagayan, Cagayan Valley, 3515, Philippines"
+],
+"234": [
+17.0629,
+122.4293,
+"Palanan, Isabela, Cagayan Valley, 3334, Philippines"
+],
+"235": [
+15.7591,
+121.5627,
+"Baler, Aurora, Central Luzon, 3200, Philippines"
+],
+"236": [
+10.9491,
+122.502,
+"Janiuay, Iloilo, Western Visayas, 5034, Philippines"
+],
+"237": [
+16.9118,
+121.0614,
+"Banaue, Ifugao, Cordillera Administrative Region, 3601, Philippines"
+],
+"238": [
+16.043,
+120.3338,
+"Dagupan, Pangasinan, Ilocos Region, 2400, Philippines"
+],
+"239": [
+15.45,
+120.62,
+"manual"
+],
+"240": [
+14.0993,
+120.9392,
+"Tagaytay, Cavite, Calabarzon, 4120, Philippines"
+],
+"241": [
+14.0917,
+121.0562,
+"Ambulong, Le Playa de Tanauan, Tanauan, Batangas, Calabarzon, 4232, Philippines"
+],
+"242": [
+14.0263,
+121.5918,
+"Tayabas, Quezon, Calabarzon, 4327, Philippines"
+],
+"243": [
+14.7465,
+121.6491,
+"Infanta, Quezon, Calabarzon, 4336, Philippines"
+],
+"244": [
+13.8801,
+120.9239,
+"Taal, Batangas, Calabarzon, 4208, Philippines"
+],
+"245": [
+13.9414,
+121.1643,
+"Lipa, Batangas, Calabarzon, 4217, Philippines"
+],
+"246": [
+13.7481,
+120.9408,
+"Mabini, Batangas, Calabarzon, 4202, Philippines"
+],
+"247": [
+8.9636,
+118.0004,
+"Sofronio Española, Palawan, Mimaropa, 5305, Philippines"
+],
+"248": [
+13.5017,
+120.9543,
+"Puerto Galera, Oriental Mindoro, Mimaropa, 5221, Philippines"
+],
+"249": [
+13.074,
+120.7218,
+"Santa Cruz, Occidental Mindoro, Mimaropa, 5105, Philippines"
+],
+"250": [
+13.4146,
+121.1795,
+"Calapan, Oriental Mindoro, Mimaropa, Philippines"
+],
+"251": [
+11.9986,
+120.2052,
+"Coron, Palawan, Mimaropa, 5316, Philippines"
+],
+"252": [
+9.7805,
+118.7301,
+"Puerto Princesa City National Science High School, Santa Monica, Puerto Princesa, Mimaropa, Philippines"
+],
+"253": [
+10.8551,
+121.0085,
+"Cuyo, Palawan, Mimaropa, 5318, Philippines"
+],
+"254": [
+12.8479,
+123.9891,
+"Juban, Sorsogon, Bicol Region, 4702, Philippines"
+],
+"255": [
+13.5804,
+124.2312,
+"Virac, Catanduanes, Bicol Region, 4800, Philippines"
+],
+"256": [
+13.1389,
+123.7346,
+"Legazpi, Albay, Bicol Region, 4500, Philippines"
+],
+"257": [
+12.2182,
+123.5094,
+"Milagros, Masbate, Bicol Region, 5410, Philippines"
+],
+"258": [
+12.4996,
+124.6365,
+"Catarman, Northern Samar, Eastern Visayas, 6400, Philippines"
+],
+"259": [
+11.2263,
+125.0231,
+"CAAP Administration Building - Tacloban, Airport Road, Fishermen Village, Barangay 88, Kataisan, Tacloban, Eastern Visayas, 6500, Philippines"
+],
+"260": [
+10.1325,
+124.8385,
+"Maasin, Southern Leyte, Eastern Visayas, Philippines"
+],
+"261": [
+9.6253,
+123.8652,
+"Dauis, Bohol, Central Visayas, 6339, Philippines"
+],
+"262": [
+10.1508,
+124.3268,
+"Talibon, Bohol, Central Visayas, 6325, Philippines"
+],
+"263": [
+9.7619,
+123.5334,
+"Dalaguete, Cebu, Central Visayas, 6022, Philippines"
+],
+"264": [
+10.6919,
+122.5689,
+"Bombo Radyo Philippines, Fermin Caram Avenue, Iloilo Central Business District, Ortiz, City Proper, Iloilo City, Western Visayas, 5000, Philippines"
+],
+"265": [
+14.7145,
+121.9381,
+"Polillo, Quezon, Calabarzon, 4339, Philippines"
+],
+"266": [
+10.2922,
+123.9033,
+"Lapu-Lapu, M.C. Briones Street, San Roque, Duljo Fatima, Cebu City, Central Visayas, 6000, Philippines"
+],
+"267": [
+9.8814,
+123.6086,
+"Argao, Cebu, Central Visayas, 6021, Philippines"
+],
+"268": [
+9.7905,
+125.4936,
+"Surigao City, Surigao del Norte, Caraga, 8400, Philippines"
+],
+"269": [
+8.9516,
+125.4787,
+"Bancasi Airport, Butuan-Cagayan de Oro-Iligan Road, Adelaida Meadow Residences, Bancasi, Dumalagan, Butuan, Caraga, 8600, Philippines"
+],
+"270": [
+8.3656,
+126.3358,
+"Hinatuan, Surigao del Sur, Caraga, 8310, Philippines"
+],
+"271": [
+8.2374,
+122.9986,
+"Sindangan, Zamboanga del Norte, Zamboanga Peninsula, 7112, Philippines"
+],
+"272": [
+8.155,
+125.1306,
+"Malaybalay, Bukidnon, Northern Mindanao, 8700, Philippines"
+],
+"273": [
+5.861,
+124.9967,
+"Maasim, Sarangani, Soccsksargen, 9502, Philippines"
+],
+"274": [
+8.0047,
+124.2854,
+"Marawi, Lanao del Sur, Bangsamoro, 9700, Philippines"
+],
+"275": [
+7.0648,
+125.6081,
+"Davao City, Davao Region, Philippines"
+],
+"276": [
+7.078,
+125.4955,
+"Bago Oshiro, Tugbok District, Davao City, Davao Region, 8000, Philippines"
+],
+"277": [
+6.1122,
+125.1722,
+"General Santos, Soccsksargen, 9500, Philippines"
+],
+"278": [
+5.988,
+124.6242,
+"Kiamba, Sarangani, Soccsksargen, Philippines"
+],
+"279": [
+6.9047,
+122.0765,
+"Zamboanga City, Zamboanga Peninsula, 7000, Philippines"
+],
+"280": [
+9.2685,
+118.4035,
+"Narra, Palawan, Mimaropa, 5303, Philippines"
+],
+"281": [
+14.6959,
+122.3307,
+"Jomalig, Quezon, Calabarzon, 4342, Philippines"
+],
+"282": [
+19.2613,
+121.4756,
+"Calayan, Cagayan, Cagayan Valley, Philippines"
+],
+"283": [
+18.5591,
+120.787,
+"Pagudpud, Ilocos Norte, Ilocos Region, 2919, Philippines"
+],
+"284": [
+18.5367,
+120.7655,
+"Bangui, Ilocos Norte, Ilocos Region, 2920, Philippines"
+],
+"285": [
+17.4112,
+121.4414,
+"Tabuk, Kalinga, Cordillera Administrative Region, 3800, Philippines"
+],
+"286": [
+17.3871,
+122.2379,
+"Maconacon, Isabela, Cagayan Valley, 3333, Philippines"
+],
+"287": [
+16.3938,
+122.2115,
+"Dilasag, Aurora, Central Luzon, 3205, Philippines"
+],
+"288": [
+14.8302,
+120.5086,
+"Hermosa, Bataan, Central Luzon, 2111, Philippines"
+],
+"289": [
+13.5218,
+122.404,
+"Mulanay, Quezon, Calabarzon, 4312, Philippines"
+],
+"290": [
+13.8818,
+123.6977,
+"Garchitorena, Camarines Sur, Bicol Region, 4428, Philippines"
+],
+"291": [
+11.2133,
+124.3914,
+"Villaba, 3rd District, Leyte, Eastern Visayas, 6537, Philippines"
+],
+"292": [
+9.865,
+124.5232,
+"Mabini, Bohol, Central Visayas, 6313, Philippines"
+],
+"293": [
+10.7285,
+123.8254,
+"Tuburan, Cebu, Central Visayas, 6043, Philippines"
+],
+"294": [
+10.6288,
+124.4073,
+"Poro, Cebu, Central Visayas, 6049, Philippines"
+],
+"295": [
+10.1196,
+123.2739,
+"Guihulngan, Negros Oriental, Negros Island Region, 6214, Philippines"
+],
+"296": [
+10.0993,
+122.8705,
+"Himamaylan, Negros Occidental, Negros Island Region, 6108, Philippines"
+],
+"297": [
+9.9734,
+122.626,
+"Cauayan, Negros Occidental, Negros Island Region, 6112, Philippines"
+],
+"298": [
+10.8961,
+123.4155,
+"Sagay, Negros Occidental, Negros Island Region, 6122, Philippines"
+],
+"299": [
+9.3055,
+123.308,
+"Dumaguete, Negros Oriental, Negros Island Region, 6200, Philippines"
+],
+"300": [
+9.2337,
+126.0604,
+"Lanuza, Surigao del Sur, Caraga, 8314, Philippines"
+],
+"301": [
+8.1859,
+125.8533,
+"Loreto, Agusan del Sur, Caraga, 8507, Philippines"
+],
+"302": [
+7.5747,
+126.5616,
+"Baganga, Davao Oriental, Davao Region, 8204, Philippines"
+],
+"303": [
+6.1979,
+125.6978,
+"Don Marcelino, Davao Occidental, Davao Region, 8013, Philippines"
+],
+"304": [
+6.7226,
+124.5206,
+"Esperanza, Sultan Kudarat, Soccsksargen, Philippines"
+],
+"305": [
+6.4596,
+124.3221,
+"Senator Ninoy Aquino, Sultan Kudarat, Soccsksargen, Philippines"
+],
+"306": [
+7.2417,
+124.5176,
+"Libungan, Cotabato, Soccsksargen, 9411, Philippines"
+],
+"307": [
+5.8227,
+125.2049,
+"Glan, Sarangani, Soccsksargen, 9517, Philippines"
+],
+"308": [
+8.6119,
+124.8934,
+"Claveria, Misamis Oriental, Northern Mindanao, 9004, Philippines"
+],
+"309": [
+8.5747,
+124.4409,
+"Laguindingan, Misamis Oriental, Northern Mindanao, 9019, Philippines"
+],
+"310": [
+7.8589,
+125.0525,
+"Musuan, Maramag, Bukidnon, Northern Mindanao, 8710, Philippines"
+],
+"311": [
+7.9983,
+125.0229,
+"Lantapan, Bukidnon, Northern Mindanao, 8722, Philippines"
+],
+"312": [
+7.7975,
+122.7619,
+"Kabasalan, Zamboanga Sibugay, Zamboanga Peninsula, 7005, Philippines"
+],
+"313": [
+8.4686,
+123.5257,
+"La Libertad, Zamboanga del Norte, Zamboanga Peninsula, Philippines"
+],
+"314": [
+7.5852,
+122.1405,
+"Sirawai, Zamboanga del Norte, Zamboanga Peninsula, 7121, Philippines"
+],
+"315": [
+7.825,
+123.4366,
+"Pagadian, Zamboanga del Sur, Zamboanga Peninsula, 7016, Philippines"
+],
+"316": [
+8.1545,
+123.3448,
+"Dumingag, Zamboanga del Sur, Zamboanga Peninsula, 7028, Philippines"
+],
+"317": [
+7.4532,
+123.3127,
+"Pitogo, Zamboanga del Sur, Zamboanga Peninsula, 7033, Philippines"
+],
+"327": [
+14.5605,
+121.0764,
+"Pasig, Eastern Manila District, Metro Manila, Philippines"
+],
+"328": [
+14.586,
+120.969,
+"manual"
+],
+"329": [
+14.5872,
+121.1759,
+"Antipolo, Rizal, Calabarzon, Philippines"
+],
+"330": [
+14.7151,
+121.0732,
+"La Mesa Dam, Greater Lagro, 5th District, Quezon City, Eastern Manila District, Metro Manila, 1118, Philippines"
+],
+"448": [
+6.3313,
+124.9512,
+"Tupi, South Cotabato, Soccsksargen, 9505, Philippines"
+],
+"457": [
+8.1301,
+124.2149,
+"Maria Cristina Airport, Iligan-Marawi Road, Poblacion West, Balo-i, Lanao del Norte, Northern Mindanao, 9217, Philippines"
+]
+}

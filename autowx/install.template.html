@@ -1,0 +1,85 @@
+<!doctype html>
+<!-- AutoWx — made by April Love E. Castillon, 2026 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Install AutoWx</title>
+<link rel="icon" type="image/svg+xml" href="{{FAVICON}}">
+<style>
+  :root{--bg:#eef6ff;--card:#fff;--text:#22304a;--muted:#6b7a90;--line:#dfe7f2;--accent:#2f6bff}
+  @media (prefers-color-scheme:dark){:root{--bg:#121a2b;--card:#1b2438;--text:#e8eefb;--muted:#9fb0c9;--line:#2c3854;--accent:#7fa2ff}}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 ui-rounded,-apple-system,"Segoe UI",sans-serif}
+  main{max-width:720px;margin:0 auto;padding:32px 16px 48px}
+  .brand{display:flex;align-items:center;gap:14px;margin-bottom:12px}
+  .brand svg{width:64px;height:64px;flex:none;filter:drop-shadow(0 3px 8px rgba(47,107,255,.3))}
+  .wm{font-weight:800;font-size:34px;letter-spacing:-.8px;line-height:1.05}.wm span{color:var(--accent)}
+  .tagline{font-size:12px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;color:var(--muted)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:20px 22px;margin-top:18px}
+  .bm{display:inline-block;margin:10px 0;padding:12px 20px;border-radius:999px;background:var(--accent);color:#fff;
+      font-weight:800;font-size:18px;text-decoration:none;cursor:grab}
+  ol{padding-left:22px}li{margin:6px 0}
+  h3{margin:14px 0 4px;font-size:16px}
+  .muted{color:var(--muted)}
+  button{font:inherit;font-weight:700;padding:7px 14px;border-radius:999px;border:1px solid var(--line);background:var(--card);
+         color:var(--text);cursor:pointer}
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">{{LOGO}}<div><div class="wm">Auto<span>Wx</span></div>
+    <div class="tagline">PAGASA weather stations</div></div></div>
+  <p class="muted">A friendly display for PAGASA automatic weather stations. It works inside the PAGASA
+  Collection System while you are signed in, and only reads data.</p>
+
+  <section class="card">
+    <h2>1. Add the button</h2>
+    <p>Show your bookmarks bar (<b>⌘⇧B</b> in Chrome, Edge or Safari), then drag this button onto it:</p>
+    <a class="bm" href="{{BOOKMARKLET}}" onclick="alert('Drag this button to your bookmarks bar instead of clicking it.');return false;">AutoWx</a>
+    <h3>Can’t drag it?</h3>
+    <ol>
+      <li>Click <button id="copy-link">Copy bookmark link</button></li>
+      <li>Right-click the bookmarks bar and choose <b>Add Page…</b> (in Edge: <b>Add page</b>; in Safari, bookmark any page first, then <b>Edit Address</b>).</li>
+      <li>Name it <b>AutoWx</b>, click in the <b>URL</b> box, paste (<b>⌘V</b>), and click <b>Save</b>.</li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2>2. Use it</h2>
+    <ol>
+      <li>Open <b>cserv.panahon.gov.ph</b> and sign in as usual.</li>
+      <li>Click <b>AutoWx</b> on your bookmarks bar.</li>
+      <li>Allow location when asked. The nearest working station appears first.</li>
+      <li>Use <b>➕ Stations</b> to add more stations, or <b>Station status</b> to check every station.</li>
+    </ol>
+    <p class="muted">It updates every 10 minutes. <b>Exit</b> takes you back to the normal AWS page.
+    Station locations ({{COUNT}}) are approximate town centres, which is close enough to pick the nearest station.</p>
+  </section>
+
+  <section class="card">
+    <h2>No bookmarks bar?</h2>
+    <p>Sign in, open the browser console (<b>⌥⌘J</b> in Chrome), paste the code, and press Enter.</p>
+    <p><button id="copy">Copy code</button></p>
+    <script>
+      // Both buttons copy from the AutoWx button, so the page carries only one copy of the code.
+      var link = document.querySelector('a.bm').getAttribute('href');
+      document.getElementById('copy-link').addEventListener('click', function () { copyText(this, link); });
+      document.getElementById('copy').addEventListener('click', function () {
+        copyText(this, decodeURIComponent(link.slice('javascript:'.length)));
+      });
+      function copyText(btn, code) {
+        function done() { btn.textContent = 'Copied ✓'; }
+        function fallback() {
+          var ta = document.createElement('textarea');
+          ta.value = code; document.body.appendChild(ta); ta.select();
+          try { document.execCommand('copy'); done(); } catch (e) { alert('Copy failed. Drag the AutoWx button to the bookmarks bar instead.'); }
+          ta.remove();
+        }
+        if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(code).then(done, fallback);
+        else fallback();
+      }
+    </script>
+  </section>
+</main>
+</body>
+</html>
