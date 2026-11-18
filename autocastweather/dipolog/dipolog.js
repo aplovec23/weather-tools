@@ -5,12 +5,19 @@
     area: 'Zamboanga Peninsula and Misamis Occidental',
     city: 'DIPOLOG CITY',
     lat: 8.5993, lon: 123.3436, // PAGASA Dipolog synoptic station
-    // Which part of the Mindanao forecast covers our area, best match first.
-    match: [
-      /zamboanga|misamis occidental|western mindanao/i,
-      /northern mindanao/i,
-      /rest of mindanao|^mindanao|whole mindanao|rest of the country|whole country/i
+    // Provinces in Dipolog station's forecast, in the order they are listed. "region" = names PAGASA may use for their region.
+    // Provinces with the same "zone" are named as that zone when they all share one forecast.
+    provinces: [
+      { name: 'Zamboanga del Norte', zone: 'Zamboanga Peninsula', region: /Zamboanga Peninsula|Western Mindanao|Region (IX|9)\b/i },
+      { name: 'Zamboanga del Sur', zone: 'Zamboanga Peninsula', region: /Zamboanga Peninsula|Western Mindanao|Region (IX|9)\b/i },
+      { name: 'Zamboanga Sibugay', zone: 'Zamboanga Peninsula', region: /Zamboanga Peninsula|Western Mindanao|Region (IX|9)\b/i },
+      { name: 'Zamboanga City', zone: 'Zamboanga Peninsula', region: /Zamboanga Peninsula|Western Mindanao|Region (IX|9)\b/i },
+      { name: 'Misamis Occidental', region: /Northern Mindanao|Region (X|10)\b/i }
     ],
+    // Parts of the forecast meant for "everywhere else".
+    rest: /rest of|^mindanao$|whole mindanao|entire mindanao/i,
+    // Places that make a national synopsis sentence about Mindanao.
+    mindanao: /mindanao|davao|surigao|zamboanga|cotabato|general santos|dipolog|cagayan de oro|butuan|bukidnon|lanao|misamis|agusan|basilan|sulu|tawi|sarangani|caraga|soccsksargen|barmm|dinagat|camiguin/i,
     gif: 'https://src.meteopilipinas.gov.ph/repo/mtsat-colored/24hour/latest-him-colored.gif',
     regional: 'https://pagasa.dost.gov.ph/regional-forecast/minprsd',
     weather: 'https://pagasa.dost.gov.ph/weather'
@@ -177,7 +184,7 @@
     var age = (Date.now() - issue) / 3600000;
     if (age > 13) note('The Mindanao forecast was issued ' + Math.round(age) + ' hours ago. Check that a newer one is not due.');
 
-    // Split the forecast into area blocks ("X will experience ...") and pick ours.
+    // Split the Mindanao forecast into its parts ("<area> will experience ...").
     var sentences = cond.split(/(?<=\.)\s+(?=[A-Z])/);
     var blocks = [], winds = [];
     sentences.forEach(function (s) {
@@ -185,43 +192,82 @@
       else blocks[blocks.length - 1].rest.push(s);
       if (/\bwinds?\b/i.test(s)) winds.push(s);
     });
-    var block = null;
-    for (var i = 0; i < CFG.match.length && !block; i++) {
-      block = blocks.find(function (b) { return CFG.match[i].test(b.head.split(/ will /i)[0]); });
+    blocks.forEach(function (b) {
+      b.area = b.head.split(/ will /i)[0];
+      var m = b.head.match(/ will (?:experience|have) (.+?)(?:,? (?:also |still )?due to (?:the )?(.+?))?\.$/i);
+      if (!m) throw new Error('Could not read the forecast sentence: ' + b.head);
+      b.wx = m[1];
+      b.cause = m[2] || '';
+      b.impacts = b.rest.filter(function (s) { return !/\bwinds?\b/i.test(s) && !/^no significant impact/i.test(s); });
+      b.wind = b.rest.filter(function (s) { return /\bwinds?\b/i.test(s); })[0] || winds[winds.length - 1] || '';
+      b.provinces = [];
+    });
+
+    // Province level: give each province the part of the forecast that names it, then its region, else "the rest of Mindanao".
+    function pickBlock(p) {
+      var byName = new RegExp('\\b' + p.name + '\\b', 'i');
+      return blocks.find(function (b) { return byName.test(b.area); })
+        || blocks.find(function (b) { return !CFG.rest.test(b.area) && p.region.test(b.area); })
+        || blocks.find(function (b) { return CFG.rest.test(b.area); })
+        || blocks[blocks.length - 1];
     }
-    if (!block) block = blocks[blocks.length - 1];
-    if (blocks.length > 1) note('PAGASA split Mindanao into ' + blocks.length + ' areas; used the one for “' + block.head.split(/ will /i)[0] + '”.');
-    var wx = block.head.match(/ will (?:experience|have) (.+?)(?: due to (?:the )?(.+?))?\.$/i);
-    if (!wx) throw new Error('Could not read the forecast sentence: ' + block.head);
-    var cause = wx[2] || '';
-    var skyRain = wx[1].split(/ with /i);
-    var impacts = block.rest.filter(function (s) { return !/\bwinds?\b/i.test(s); });
-    var wind = block.rest.filter(function (s) { return /\bwinds?\b/i.test(s); })[0] || winds[winds.length - 1] || '';
+    var groups = [];
+    CFG.provinces.forEach(function (p) {
+      var b = pickBlock(p);
+      b.provinces.push(p.name);
+      if (groups.indexOf(b) < 0) groups.push(b);
+    });
+    function list(a, and) {
+      return a.length < 3 ? a.join(' ' + and + ' ') : a.slice(0, -1).join(', ') + ', ' + and + ' ' + a[a.length - 1];
+    }
+    // Name a whole zone (e.g. Zamboanga Peninsula) once when all its provinces are in the same group.
+    groups.forEach(function (g) {
+      CFG.provinces.forEach(function (p) {
+        if (!p.zone || g.provinces.indexOf(p.zone) >= 0) return;
+        var members = CFG.provinces.filter(function (q) { return q.zone === p.zone; }).map(function (q) { return q.name; });
+        if (members.every(function (n) { return g.provinces.indexOf(n) >= 0; })) {
+          var at = g.provinces.indexOf(members[0]);
+          g.provinces = g.provinces.filter(function (n) { return members.indexOf(n) < 0; });
+          g.provinces.splice(at, 0, p.zone);
+        }
+      });
+    });
+    var oneWind = groups.every(function (g) { return g.wind === groups[0].wind; });
+    var enParts = [], cebParts = [];
+    groups.forEach(function (g) {
+      var skyRain = g.wx.split(/ with /i);
+      enParts.push(list(g.provinces, 'and') + ' will experience ' + g.wx + (g.cause ? ' due to ' + bold(g.cause) : '') + '.');
+      cebParts.push('Ang ' + list(g.provinces, 'ug') + ' makasinati sa ' + sky(skyRain[0])
+        + (skyRain[1] ? ' inubanan sa ' + rain(skyRain[1]) : '') + (g.cause ? ' tungod sa ' + bold(g.cause) : '') + '.');
+      enParts = enParts.concat(g.impacts);
+      cebParts = cebParts.concat(g.impacts.map(impactCeb).filter(Boolean));
+      if (!oneWind && g.wind) { enParts.push(g.wind); cebParts.push(windCeb(g.wind)); }
+    });
+    if (oneWind && groups[0].wind) { enParts.push(groups[0].wind); cebParts.push(windCeb(groups[0].wind)); }
+    var en = enParts.join(' '), ceb = cebParts.join(' ');
+    if (blocks.length > 1) {
+      note('PAGASA split Mindanao into ' + blocks.length + ' parts. Used: ' + groups.map(function (g) {
+        return list(g.provinces, 'and') + ' → “' + g.area + '”';
+      }).join('; ') + '.');
+    }
 
-    var en = [CFG.area + ' will experience ' + wx[1] + (cause ? ' due to ' + bold(cause) : '') + '.']
-      .concat(impacts.filter(function (s) { return !/^no significant impact/i.test(s); }), wind ? [wind] : []).join(' ');
-    var ceb = ['Ang ' + CFG.area.replace(/ and /g, ' ug ') + ' makasinati sa ' + sky(skyRain[0])
-      + (skyRain[1] ? ' inubanan sa ' + rain(skyRain[1]) : '') + (cause ? ' tungod sa ' + bold(cause) : '') + '.']
-      .concat(impacts.map(impactCeb).filter(Boolean), wind ? [windCeb(wind)] : []).join(' ');
-
-    // Synopsis: national synopsis sentences about Mindanao, else the regional cause.
+    // Synopsis, Mindanao only: what drives each part of the Mindanao forecast,
+    // plus national synopsis sentences that locate a system near Mindanao (e.g. an LPA or cyclone position).
     var wdoc = new DOMParser().parseFromString(res[1], 'text/html');
     var synHead = Array.prototype.find.call(wdoc.querySelectorAll('.panel-heading'), function (e) { return /synopsis/i.test(e.textContent); });
     var natSyn = synHead ? clean((synHead.parentElement.querySelector('.panel-body') || synHead.nextElementSibling || {}).textContent) : '';
-    var synParts = natSyn.split(/(?<=\.)\s+(?=[A-Z])/).filter(function (s) { return /mindanao|whole country|entire country|whole archipelago/i.test(s); });
-    var synopsis;
-    if (synParts.length) {
-      synopsis = synParts.map(function (s) {
-        return s.replace(/^(.+?)( affecting| over| extending| bringing)/, function (_, a, b) { return bold(a) + b; });
-      }).join(' ');
-    } else if (cause) {
-      synopsis = bold(cause) + ' affecting the Mindanao.';
-    } else {
-      synopsis = '';
-      note('No weather system for Mindanao found — please type the synopsis.', true);
-    }
+    var located = natSyn.split(/(?<=\.)\s+(?=[A-Z])/).filter(function (s) { return CFG.mindanao.test(s) && !/ affecting /i.test(s); });
+    var systems = [];
+    blocks.forEach(function (b) {
+      if (!b.cause) return;
+      var area = /^mindanao$/i.test(b.area) ? 'the Mindanao' : b.area.replace(/^The /, 'the ');
+      var same = systems.find(function (x) { return x.cause.toLowerCase() === b.cause.toLowerCase(); });
+      if (same) same.areas.push(area); else systems.push({ cause: b.cause, areas: [area] });
+    });
+    var synopsis = located.concat(systems.map(function (x) { return bold(x.cause) + ' affecting ' + list(x.areas, 'and') + '.'; })).join(' ');
+    if (!synopsis) note('No weather system for Mindanao found — please type the synopsis.', true);
 
-    // Astronomy over Dipolog, from the issue time, earliest first in each pair.
+    // Astronomy over Dipolog: two suns, then two moons; in each pair, whichever happens next after the issue time comes first.
     function when(ms) {
       var dd = dayNo(ms) - dayNo(issue);
       return dd === 0 ? 'today' : dd === 1 ? 'tomorrow' : 'on ' + MONTHS[ph(ms).getUTCMonth()] + ' ' + ph(ms).getUTCDate();
@@ -229,7 +275,7 @@
     var sr = Astro.next('sun', 'rise', issue, CFG.lat, CFG.lon);
     var ss = Astro.next('sun', 'set', issue, CFG.lat, CFG.lon);
     var mr = Astro.next('moon', 'rise', issue, CFG.lat, CFG.lon);
-    var ms = Astro.next('moon', 'set', mr || issue, CFG.lat, CFG.lon);
+    var ms = Astro.next('moon', 'set', issue, CFG.lat, CFG.lon);
     var astro = [['Sunrise', sr], ['Sunset', ss]].sort(function (a, b) { return (a[1] || 9e15) - (b[1] || 9e15); })
       .concat([['Moonrise', mr], ['Moonset', ms]].sort(function (a, b) { return (a[1] || 9e15) - (b[1] || 9e15); }));
     // Line the times up with spaces, sized for Facebook's font like the original post.
