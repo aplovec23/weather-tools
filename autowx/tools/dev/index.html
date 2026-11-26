@@ -37,11 +37,12 @@ var STATIONS = [
   ['202', '5050', 'Aborlan, Palawan AWS', { list: ['-', '-', '-', '-', '-', '-'] }]
 ];
 
-function series(prof) {
-  var rows = [], end = NOW - prof.lastAgo * MIN, total = 0;
+// toMs/count: records up to that time (for earlier periods); default the last 24 hours.
+function series(prof, toMs, count) {
+  var rows = [], end = Math.min(toMs || Infinity, NOW - prof.lastAgo * MIN), total = 0;
   end -= end % (10 * MIN);
-  var rain = (prof.rain || []).slice();
-  for (var k = 143; k >= 0; k--) {
+  var rain = toMs && toMs < NOW - prof.lastAgo * MIN ? [] : (prof.rain || []).slice();
+  for (var k = (count || 144) - 1; k >= 0; k--) {
     var t = end - k * 10 * MIN, h = hourPht(t);
     var day = Math.max(0, Math.sin((h - 6) / 12 * Math.PI));            // 0 at night, 1 at noon
     var raining = k < rain.length;
@@ -96,7 +97,12 @@ window.fetch = function (url) {
   var u = new URL(url, location.href);
   if (u.pathname === '/admin/aws') return Promise.resolve(new Response(listHtml(), { headers: { 'Content-Type': 'text/html' } }));
   if (u.pathname === '/admin/datatable') {
-    var rows = DATA[u.searchParams.get('station_id')] || [];
+    var id = u.searchParams.get('station_id'), rows = DATA[id] || [];
+    // Earlier period asked for: make records for that range (from_date / to_date are "M/D/YYYY HH:mm" PHT).
+    function q(v) { var m = /(\d+)\/(\d+)\/(\d+) (\d+):(\d+)/.exec(v || ''); return m ? Date.UTC(+m[3], m[1] - 1, +m[2], +m[4], +m[5]) - 8 * 3600000 : null; }
+    var f = q(u.searchParams.get('from_date')), t = q(u.searchParams.get('to_date'));
+    var st = STATIONS.filter(function (x) { return x[0] === id; })[0];
+    if (st && st[3].t != null && f != null && t != null && t < NOW - 60 * MIN) rows = series(st[3], t, Math.round((t - f) / (10 * MIN)));
     return new Promise(function (ok) {
       setTimeout(function () { ok(new Response(JSON.stringify({ draw: 1, data: rows }), { headers: { 'Content-Type': 'application/json' } })); }, 250);
     });

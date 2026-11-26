@@ -64,6 +64,9 @@
     here: null,                          // {lat, lon}
     geo: 'idle',                         // idle | asking | ok | denied | unavailable
     nearestId: null,
+    nearOnly: false,                     // "Near me": show only the nearest station
+    nearPick: saved.nearPick || null,    // {key, id} station chosen when several are equally near
+    tie: null,                           // stations to choose from (equally near), while the chooser is open
     picker: false,
     pickerQuery: '',
     board: { filter: 'all', query: '', sort: { key: 'severity', dir: 1 } },
@@ -77,7 +80,7 @@
   }
   function save() {
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify({ view: state.view, fit: state.fit, selected: state.selected, groups: state.groups, scope: state.scope }));
+      localStorage.setItem(STORE_KEY, JSON.stringify({ view: state.view, fit: state.fit, selected: state.selected, groups: state.groups, scope: state.scope, nearPick: state.nearPick }));
     } catch (e) { /* storage blocked — selection just won't be remembered */ }
   }
 
@@ -331,8 +334,10 @@
   var DT_COLUMNS = ['id', 'air_temperature_avg', 'solar_radiation_avg', 'barometric_pressure_avg', 'wind_speed',
     'wind_direction', 'relative_humidity_avg', 'accumulated_rain', 'accumulated_rain_total', 'battery_voltage', 'observation_at'];
 
-  function fetchHistory(id) {
+  // Records for one station; by default the last 24 hours, or from–to (ms) for an earlier period.
+  function fetchHistory(id, from, to) {
     var now = Date.now();
+    if (from == null) { from = now - CONFIG.historyHours * 3600000; to = now + 30 * 60000; }
     var p = new URLSearchParams();
     p.set('draw', '1');
     DT_COLUMNS.forEach(function (c, i) {
@@ -346,12 +351,12 @@
     p.set('order[0][column]', String(DT_COLUMNS.length - 1));
     p.set('order[0][dir]', 'desc');
     p.set('start', '0');
-    p.set('length', String(CONFIG.historyHours * 6 + 12));
+    p.set('length', String(Math.ceil((to - from) / 600000) + 12));
     p.set('search[value]', '');
     p.set('search[regex]', 'false');
     p.set('station_id', id);
-    p.set('from_date', manilaQuery(now - CONFIG.historyHours * 3600000));
-    p.set('to_date', manilaQuery(now + 30 * 60000));
+    p.set('from_date', manilaQuery(from));
+    p.set('to_date', manilaQuery(to));
     return fetch(DATA_URL + '?' + p.toString(), {
       credentials: 'same-origin', cache: 'no-store',
       headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
@@ -452,39 +457,74 @@
 
   // ---------- location ----------
 
-  function locate() {
-    if (!navigator.geolocation) { state.geo = 'unavailable'; render(); return; }
+  // ask = true when the user pressed "Near me": if several stations are equally near, let them choose.
+  function locate(ask) {
+    if (!navigator.geolocation) { state.geo = 'unavailable'; state.nearOnly = false; render(); return; }
     state.geo = 'asking';
     render();
     navigator.geolocation.getCurrentPosition(function (pos) {
       state.here = { lat: pos.coords.latitude, lon: pos.coords.longitude };
       state.geo = 'ok';
-      chooseNearest();
+      chooseNearest(ask);
+      render();
       loadShown();
     }, function () {
       state.geo = 'denied';
+      state.nearOnly = false;
       if (!state.selected.length) state.picker = true;
       render();
     }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 10 * 60000 });
   }
 
-  // Nearest station that is reporting (or only a little late) and has a location.
-  function chooseNearest() {
-    if (!state.here || !state.stations.length) return;
-    var now = Date.now();
-    var best = null;
+  // Stations that are reporting (or only a little late), have a location, and are all at the nearest distance.
+  // Station locations are approximate town centres, so stations in the same town can tie.
+  function nearestStations() {
+    var now = Date.now(), list = [];
     state.stations.forEach(function (s) {
       assess(s, now);
       if (s.lat == null) return;
       s.distance = distanceKm(state.here, s);
-      if (s.state !== 'ok' && s.state !== 'late') return;
-      if (!best || s.distance < best.distance) best = s;
+      if (s.state === 'ok' || s.state === 'late') list.push(s);
     });
-    state.nearestId = best ? best.id : null;
+    list.sort(function (a, b) { return a.distance - b.distance; });
+    return list.filter(function (s) { return list.length && s.distance - list[0].distance < 0.05; });
+  }
+  function tieKey(list) { return list.map(function (s) { return s.id; }).sort().join(','); }
+  function chooseNearest(ask) {
+    if (!state.here || !state.stations.length) return;
+    var near = nearestStations();
+    if (!near.length) { state.nearestId = null; return; }
+    var key = tieKey(near), pick = state.nearPick && state.nearPick.key === key ? state.nearPick.id : null;
+    if (near.length > 1 && ask) {
+      state.tie = { key: key, ids: near.map(function (s) { return s.id; }) };   // open the chooser
+    }
+    state.nearestId = pick && near.some(function (s) { return s.id === pick; }) ? pick : near[0].id;
+  }
+  function chooseTie(id) {
+    if (!state.tie) return;
+    state.nearPick = { key: state.tie.key, id: id };
+    state.nearestId = id; state.tie = null; state.nearOnly = true;
+    save(); render(); loadShown(); window.scrollTo(0, 0);
+  }
+  function tieView() {
+    var t = state.tie;
+    var rows = t.ids.map(stationById).filter(Boolean).map(function (s) {
+      var cur = s.id === state.nearestId;
+      return '<button class="tie-row' + (cur ? ' on' : '') + '" data-tie="' + esc(s.id) + '"><span class="tie-n"><b>' + esc(s.label) + '</b>' +
+        '<span class="sid">Station ' + esc(s.siteId) + ' · last report ' + esc(ageText(s.time != null ? (Date.now() - s.time) / 60000 : null)) + '</span></span>' +
+        '<span class="tie-d">' + (s.distance < 10 ? fmt(s.distance) : Math.round(s.distance)) + ' km</span></button>';
+    }).join('');
+    return '<div class="sheet tie" role="dialog" aria-label="Choose the station to show"><div class="sheet-h"><h2>Choose a station</h2>' +
+      '<button class="icon-btn" data-act="tie-close" title="Close" aria-label="Close">' + icon('close') + '</button></div>' +
+      '<p class="muted small">These stations are the same distance from you. Which one should Near me show?</p>' +
+      '<div class="tie-list">' + rows + '</div>' +
+      '<p class="fine">Your choice is remembered for this place; press Near me again to change it.</p></div>';
   }
 
   // The nearest station is shown first when there is a free slot; picked stations are never pushed out.
+  // After "Near me", only the nearest station is shown.
   function shownIds() {
+    if (state.nearOnly) return state.nearestId ? [state.nearestId] : [];
     var ids = [];
     if (state.nearestId && (state.selected.length < CONFIG.maxShown || state.selected.indexOf(state.nearestId) !== -1)) ids.push(state.nearestId);
     state.selected.forEach(function (id) { if (ids.indexOf(id) === -1) ids.push(id); });
@@ -1054,6 +1094,13 @@
       out += '<div class="note">' + icon('pin') + 'No working station with a known location was found near you.</div>';
     }
     var ids = shownIds();
+    if (state.nearOnly && state.nearestId) {
+      var ns = stationById(state.nearestId);
+      out += '<div class="note near-only">' + icon('pin') + '<span>Showing only the station nearest to you' +
+        (ns && ns.distance != null ? ' (' + (ns.distance < 10 ? fmt(ns.distance) : Math.round(ns.distance)) + ' km away)' : '') + '.' +
+        (state.selected.length ? ' <button class="link" data-act="near-off">Show my ' + state.selected.length + ' station' + (state.selected.length > 1 ? 's' : '') + ' again</button>' : '') +
+        '</span></div>';
+    }
     if (!ids.length && state.geo !== 'asking') {
       out += '<div class="empty">' + scene('partly', false) + '<p>Choose a weather station to see its latest readings.</p>' +
         '<button class="btn primary" data-act="pick">' + icon('plus') + 'Choose stations</button></div>';
@@ -1264,6 +1311,11 @@
     gross: { rh: [1, 110] }        // QC gross limits where they differ from display limits (RH 100–110 = over-reading, tested separately)
   };
 
+  // Shown on the Maintenance page and in every maintenance report (screen, PDF and JPEG).
+  var WMO_NOTE = 'Checks follow WMO practice for automatic weather station data (WMO-No. 8 and the WMO guidelines on quality control of AWS data): ' +
+    'range, step, persistence and internal-consistency tests on each sensor, plus data completeness, logger clock and power supply. ' +
+    'Thresholds are set for 10-minute data. Select a station for its full report and recommended actions.';
+
   var COMPONENTS = [
     { key: 'comms', name: 'Data transmission', icon: 'signal' },
     { key: 'clock', name: 'Logger clock', icon: 'clock' },
@@ -1348,26 +1400,29 @@
     sensorWire: 'Check the sensor cable and logger channel; the sensor is not sending readings.'
   };
 
-  function assessStation(st, rows) {
-    var now = Date.now(), from = now - QC.windowHours * 3600000;
-    rows = (rows || []).filter(function (r) { return r.t >= from - 600000 && r.t <= now + QC.windowHours * 3600000; });
+  // win = {from, to} (ms) assesses an earlier period; without it, the last 24 hours up to now.
+  function assessStation(st, rows, win) {
+    var live = !win;
+    var now = live ? Date.now() : win.to, from = live ? now - QC.windowHours * 3600000 : win.from;
+    var hours = Math.round((now - from) / 3600000);
+    rows = (rows || []).filter(function (r) { return r.t >= from - 600000 && r.t <= (live ? now + QC.windowHours * 3600000 : now); });
     var comps = {};
     COMPONENTS.forEach(function (c) { comps[c.key] = component(c.key); });
 
     // --- Data transmission (completeness, gaps, latency)
-    var expected = QC.windowHours * QC.slotsPerHour;
+    var expected = Math.max(1, Math.round((now - from) / 600000));
     var stamps = {};
     rows.forEach(function (r) { stamps[r.t] = (stamps[r.t] || 0) + 1; });
     var unique = Object.keys(stamps).length;
     var share = Math.min(1, unique / expected);
     var c = comps.comms;
-    var lastAge = st && st.time != null ? (now - st.time) / 60000 : null;
+    var lastAge = live && st && st.time != null ? (now - st.time) / 60000 : null;
     if (!rows.length) {
-      var when = !st || !st.timeText ? '' : st.state === 'clock'
+      var when = !live || !st || !st.timeText ? '' : st.state === 'clock'
         ? ' (the logger reports the year ' + st.timeText.slice(0, 4) + ', so its data may be filed under the wrong date)'
         : ' (last report ' + st.timeText + ', ' + ageText(lastAge) + ')';
-      flag(c, 'fault', 'No records received in the last ' + QC.windowHours + ' hours' + when + '.',
-        st && st.state === 'clock' ? [ACT.clock, ACT.commsVisit] : [ACT.commsVisit, ACT.comms]);
+      flag(c, 'fault', 'No records received ' + (live ? 'in the last ' + hours + ' hours' : 'in this period') + when + '.',
+        live && st && st.state === 'clock' ? [ACT.clock, ACT.commsVisit] : [ACT.commsVisit, ACT.comms]);
     } else {
       var sorted = rows.slice().sort(function (a, b) { return a.t - b.t; });
       var gap = { ms: sorted[0].t - from, at: from };
@@ -1391,7 +1446,7 @@
 
     // --- Logger clock
     c = comps.clock;
-    if (st && st.state === 'clock') {
+    if (live && st && st.state === 'clock') {
       flag(c, 'fault', 'Latest timestamp is in the future (' + st.timeText + ').', [ACT.clock]);
     }
     var offGrid = rows.filter(function (r) { return Math.round(r.t / 60000) % 10 !== 0; }).length;
@@ -1413,7 +1468,7 @@
     if (volts.length) {
       var vmin = Math.min.apply(null, volts), vmax = Math.max.apply(null, volts);
       c.metrics = { min: vmin, max: vmax, last: volts[volts.length - 1] };
-      var range = 'Battery ' + fmt(vmin) + '–' + fmt(vmax) + ' V over ' + QC.windowHours + ' h.';
+      var range = 'Battery ' + fmt(vmin) + '–' + fmt(vmax) + ' V over ' + hours + ' h.';
       if (vmin < QC.battery.fault) flag(c, 'fault', range + ' Dropped below ' + QC.battery.fault + ' V.', [ACT.battery, ACT.charging]);
       else if (vmin < QC.battery.check) flag(c, 'check', range + ' Dropped below ' + QC.battery.check + ' V.', [ACT.battery, ACT.charging]);
       else c.findings.push({ result: 'ok', text: range });
@@ -1424,7 +1479,7 @@
       if (dayVolts.length >= 6 && Math.max.apply(null, dayVolts) < QC.battery.charged) {
         flag(c, 'check', 'No charging seen: daytime voltage stayed below ' + QC.battery.charged + ' V.', [ACT.charging]);
       }
-    } else if (st && st.battery != null && st.battery > 0) {
+    } else if (live && st && st.battery != null && st.battery > 0) {
       if (st.battery < QC.battery.fault) flag(c, 'fault', 'Last reported battery ' + st.battery + ' V.', [ACT.battery, ACT.charging]);
       else c.findings.push({ result: 'ok', text: 'Last reported battery ' + st.battery + ' V.' });
     } else {
@@ -1563,7 +1618,7 @@
       if (clearRain >= 2) flag(comps.rain, 'check', clearRain + ' rain record(s) under strong sun and dry air — possible false tips.', [ACT.gauge, ACT.counter]);
       if (comps.rain.result === 'ok') {
         var tot = good.reduce(function (sum, r) { return sum + r.raw.rain; }, 0);
-        comps.rain.findings.push({ result: 'ok', text: 'Tests passed. ' + fmt(tot) + ' mm recorded in ' + QC.windowHours + ' h.' });
+        comps.rain.findings.push({ result: 'ok', text: 'Tests passed. ' + fmt(tot) + ' mm recorded in ' + hours + ' h.' });
       }
     }
 
@@ -1593,7 +1648,8 @@
         if (f.result !== 'ok' && (!top || RESULT[f.result].rank > RESULT[top.result].rank)) top = { result: f.result, text: x.name + ': ' + f.text };
       });
     });
-    return { overall: overall, components: list, top: top, rows: rows, expected: expected, from: from, to: now };
+    return { overall: overall, components: list, top: top, rows: rows, expected: expected, from: from, to: now,
+      hours: hours, live: live, assessedAt: Date.now() };
   }
 
   // Station's assessment, or null when its data has not been loaded yet.
@@ -1715,9 +1771,7 @@
       '<span class="dl-n">For one station or one instrument, open the station below.</span></div>' +
       '<div class="table-wrap"><table class="mtable"><thead>' + head + '</thead><tbody>' +
       (body || '<tr><td colspan="12" class="muted center">No stations match.</td></tr>') + '</tbody></table></div>' +
-      '<p class="fine">Checks follow WMO practice for automatic weather station data (WMO-No. 8 and the WMO guidelines on quality control of AWS data): ' +
-      'range, step, persistence and internal-consistency tests on each sensor, plus data completeness, logger clock and power supply. ' +
-      'Thresholds are set for 10-minute data. Select a station for its full report and recommended actions.</p></div>';
+      '<p class="fine">' + WMO_NOTE + '</p></div>';
   }
 
   function completenessStrip(a) {
@@ -1809,6 +1863,7 @@
         'Check the battery voltage, charge controller and logger clock; download stored data.',
         'Compare readings with reference instruments; record any sensor change or calibration in the station log.'
       ].map(function (x) { return '<li><span class="box"></span>' + x + '</li>'; }).join('') + '</ul></section>' +
+      '<p class="fine">' + WMO_NOTE + '</p>' +
       '<p class="fine">Assessment uses the station’s uploaded 10-minute data and WMO-style quality-control tests. ' +
       'Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment. ' +
       '<span class="no-print">Select an instrument’s chart (or Zoom in) to see its readings in detail and download that instrument’s report.</span></p>' +
@@ -2182,6 +2237,41 @@
     renderZoom();
   }
   function closeZoom() { state.zoom = null; var z = document.getElementById('wn-zoom'); z.hidden = true; z.innerHTML = ''; }
+  function dayStart(date) { var p = date.split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]) - 8 * HOUR; }   // 12 AM PHT
+  function dateOf(ms) { var d = phtDate(ms); return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()); }
+  // Load and assess an earlier period: `days` calendar days ending on `date` (YYYY-MM-DD, Philippine time).
+  function loadZoomPeriod(date, days) {
+    var z = state.zoom;
+    if (!z || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    var end = dayStart(date) + 24 * HOUR, from = end - days * 24 * HOUR, to = Math.min(end, Date.now());
+    if (from >= to) return;
+    var ticket = z.ticket = (z.ticket || 0) + 1;
+    z.period = { date: date, days: days }; z.loading = true; z.error = null;
+    renderZoom();
+    fetchHistory(z.id, from, to).then(function (rows) {
+      if (state.zoom !== z || z.ticket !== ticket) return;
+      z.a = assessStation(stationById(z.id), rows, { from: from, to: to });
+      z.t0 = from; z.t1 = to; z.loading = false; z.hover = null;
+      renderZoom();
+    }).catch(function (err) {
+      if (state.zoom !== z || z.ticket !== ticket) return;
+      z.loading = false;
+      z.error = err instanceof SignedOut ? 'You have been signed out of cserv. Sign in again, then reopen AutoWx.' : (err && err.message) || 'Could not load that period.';
+      renderZoom();
+    });
+  }
+  function zoomLatest() {
+    var z = state.zoom, a = maintFor(stationById(z.id));
+    if (!a) return;
+    z.ticket = (z.ticket || 0) + 1; z.period = null; z.error = null; z.loading = false;
+    z.a = a; z.t0 = a.from; z.t1 = a.to; renderZoom();
+  }
+  function zoomStepDay(dir) {
+    var z = state.zoom, cur = z.period ? z.period.date : dateOf(Date.now());
+    var next = dateOf(dayStart(cur) + dir * 24 * HOUR + HOUR);
+    if (dayStart(next) > Date.now()) return;
+    loadZoomPeriod(next, z.period ? z.period.days : 1);
+  }
   function setZoomRange(t0, t1) {
     var z = state.zoom, a = z.a, span = Math.max(30 * 60000, t1 - t0);
     if (span >= a.to - a.from) { z.t0 = a.from; z.t1 = a.to; }
@@ -2199,10 +2289,23 @@
     var st = stationById(z.id), a = z.a, c = compOf(a, z.key), spec = z.spec = instrumentSpec(a, z.key);
     var full = z.t0 <= a.from && z.t1 >= a.to;
     var hrsShown = Math.round((z.t1 - z.t0) / HOUR * 10) / 10;
-    var ranges = [24, 12, 6, 3, 1].map(function (n) {
-      var on = Math.abs(hrsShown - n) < 0.05 && Math.abs(z.t1 - a.to) < 60000;
-      return '<button class="seg' + (on ? ' on' : '') + '" data-zrange="' + n + '">' + n + ' h</button>';
+    var long = a.to - a.from > 25 * HOUR;
+    var ranges = (long ? ['all', 24, 12, 6, 3] : [24, 12, 6, 3, 1]).map(function (n) {
+      var on = n === 'all' ? full : Math.abs(hrsShown - n) < 0.05 && Math.abs(z.t1 - a.to) < 60000;
+      return '<button class="seg' + (on ? ' on' : '') + '" data-zrange="' + n + '">' + (n === 'all' ? 'All ' + Math.round((a.to - a.from) / 86400000) + ' days' : n + ' h') + '</button>';
     }).join('');
+    var today = dateOf(Date.now()), curDate = z.period ? z.period.date : today, curDays = z.period ? z.period.days : 1;
+    var period = '<div class="zper"><span class="zper-l">' + icon('clock') + 'Period</span>' +
+      '<button class="icon-btn" data-zday="-1" title="Previous day" aria-label="Previous day">' + icon('back') + '</button>' +
+      '<input type="date" id="wn-zdate" value="' + curDate + '" max="' + today + '" aria-label="Day">' +
+      '<button class="icon-btn flip" data-zday="1" title="Next day" aria-label="Next day"' + (!z.period || curDate >= today ? ' disabled' : '') + '>' + icon('back') + '</button>' +
+      '<select id="wn-zdays" aria-label="Number of days">' + [1, 2, 3, 7].map(function (n) {
+        return '<option value="' + n + '"' + (n === curDays ? ' selected' : '') + '>' + (n === 1 ? '1 day' : n + ' days, ending that day') + '</option>';
+      }).join('') + '</select>' +
+      '<button class="btn sm' + (z.period ? '' : ' on') + '" data-act="zoom-latest">Latest 24 h</button>' +
+      (z.loading ? '<span class="zload">Loading and checking…</span>' : '') +
+      (z.error ? '<span class="zerr">' + esc(z.error) + '</span>' : '') +
+      '<span class="zper-n">' + (z.period ? 'Checked for ' + rangeLabel(a.from, a.to) : 'Showing the last 24 hours') + '</span></div>';
     var stats = statsIn(spec, z.t0, z.t1).map(function (s) { return '<div class="zst"><span>' + s[0] + '</span><b>' + esc(s[1]) + '</b></div>'; }).join('');
     var rows = spec.rowsIn(z.t0, z.t1);
     var table = '<table class="ztab"><thead><tr>' + spec.cols.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '<th>Flag</th></tr></thead><tbody>' +
@@ -2217,6 +2320,7 @@
       '<div class="zh-b"><button class="btn" data-act="zoom-pdf">' + icon('download') + 'PDF</button>' +
       '<button class="btn" data-act="zoom-jpeg">' + icon('download') + 'JPEG</button>' +
       '<button class="icon-btn" data-act="zoom-close" title="Close" aria-label="Close">' + icon('close') + '</button></div></header>' +
+      period +
       '<div class="zbar"><div class="segs">' + ranges + '</div>' +
       '<button class="icon-btn" data-zpan="-1" title="Earlier" aria-label="Earlier"' + (z.t0 <= a.from ? ' disabled' : '') + '>' + icon('back') + '</button>' +
       '<button class="icon-btn flip" data-zpan="1" title="Later" aria-label="Later"' + (z.t1 >= a.to ? ' disabled' : '') + '>' + icon('back') + '</button>' +
@@ -2324,6 +2428,8 @@
   function Doc(title) { this.title = title; this.blocks = []; }
   Doc.prototype.add = function (b) { this.blocks.push(b); return this; };
   Doc.prototype.space = function (h) { return this.add({ h: h, draw: function () {} }); };
+  // The JPEG image stops here (the PDF keeps everything after it).
+  Doc.prototype.imageEnd = function () { this.cutAt = this.blocks.length; return this; };
   Doc.prototype.text = function (text, o) {
     o = o || {};
     var size = o.size || 12.5, f = dfont(size, o.weight), lh = Math.round(size * 1.5), indent = o.indent || 0;
@@ -2349,7 +2455,7 @@
   // Report title block.
   Doc.prototype.header = function (kicker, title, sub, kind, label, right) {
     var tl = wrap(title, DOC.W - 2 * DOC.M - 200, dfont(24, 800));
-    var h = 26 + tl.length * 32 + 24 + 14;
+    var h = Math.max(26 + tl.length * 32 + 24 + 14, 68 + (right || []).length * 17 + 12);
     return this.add({ h: h, draw: function (ctx, x, y) {
       var W = DOC.W - 2 * DOC.M;
       ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
@@ -2437,7 +2543,7 @@
 
   // Splits blocks into pages; a table header is repeated at the top of a new page.
   Doc.prototype.paginate = function () {
-    var top = DOC.M, bottom = DOC.H - DOC.M - 22, pages = [[]], y = top, bl = this.blocks;
+    var top = DOC.M, bottom = DOC.H - DOC.M - 22 - noteHeight() - 6, pages = [[]], y = top, bl = this.blocks;
     for (var i = 0; i < bl.length; i++) {
       var b = bl[i], need = b.h;
       for (var j = i; bl[j] && bl[j].keepNext && bl[j + 1]; j++) need += bl[j + 1].h;
@@ -2457,6 +2563,16 @@
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
     return { cv: cv, ctx: ctx };
   }
+  // The WMO statement, printed as a footnote above the page footer.
+  var NOTE_LH = 12.5;
+  function noteLines() { return wrap(WMO_NOTE, DOC.W - 2 * DOC.M, dfont(9, 600)); }
+  function noteHeight() { return noteLines().length * NOTE_LH + 8; }
+  function footnote(ctx, y) {   // y = top of the footnote
+    var x = DOC.M;
+    ctx.fillStyle = PAPER.grid; ctx.fillRect(x, y, 120, 1);
+    ctx.fillStyle = PAPER.muted; ctx.font = dfont(9, 600); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    noteLines().forEach(function (ln, i) { ctx.fillText(ln, x, y + 6 + i * NOTE_LH + NOTE_LH / 2); });
+  }
   function footer(ctx, y, title, page) {
     var x = DOC.M, W = DOC.W - 2 * DOC.M;
     ctx.fillStyle = PAPER.grid; ctx.fillRect(x, y, W, 1);
@@ -2470,17 +2586,20 @@
     return pages.map(function (items, i) {
       var c = newCanvas(DOC.W, DOC.H);
       items.forEach(function (it) { it.b.draw(c.ctx, DOC.M, it.y); });
+      footnote(c.ctx, DOC.H - DOC.M - 12 - noteHeight());
       footer(c.ctx, DOC.H - DOC.M - 8, title, 'Page ' + (i + 1) + ' of ' + pages.length);
       return c.cv;
     });
   };
   // One long image (no page breaks). Too tall for one image → one image per page.
   Doc.prototype.longCanvases = function () {
-    var total = DOC.M + this.blocks.reduce(function (s, b) { return s + b.h; }, 0) + 40 + DOC.M / 2;
+    var blocks = this.cutAt != null ? this.blocks.slice(0, this.cutAt) : this.blocks;
+    var total = DOC.M + blocks.reduce(function (s, b) { return s + b.h; }, 0) + 16 + noteHeight() + 40 + DOC.M / 2;
     if (total * DOC.S > 30000) return this.pageCanvases();
     var c = newCanvas(DOC.W, total), y = DOC.M;
-    this.blocks.forEach(function (b) { b.draw(c.ctx, DOC.M, y); y += b.h; });
-    footer(c.ctx, y + 10, this.title, '');
+    blocks.forEach(function (b) { b.draw(c.ctx, DOC.M, y); y += b.h; });
+    footnote(c.ctx, y + 12);
+    footer(c.ctx, y + 16 + noteHeight(), this.title, '');
     return [c.cv];
   };
 
@@ -2491,9 +2610,10 @@
     var bad = c.findings.filter(function (f) { return f.result !== 'ok'; });
     return (bad[0] || c.findings[0] || { text: c.result === 'na' ? 'No data to test.' : '' }).text;
   }
-  function addFindings(doc, c) {
-    if (!c.findings.length) doc.text(c.result === 'na' ? 'No data to test.' : 'No findings.', { color: PAPER.muted, indent: 18 });
-    c.findings.forEach(function (f) { doc.text(f.text, { indent: 18, bullet: RES_COLOR[f.result] }); });
+  // keep = the next block (a chart) stays on the same page as these lines.
+  function addFindings(doc, c, keep) {
+    if (!c.findings.length) doc.text(c.result === 'na' ? 'No data to test.' : 'No findings.', { color: PAPER.muted, indent: 18, keepNext: keep });
+    c.findings.forEach(function (f) { doc.text(f.text, { indent: 18, bullet: RES_COLOR[f.result], keepNext: keep }); });
   }
   function addActions(doc, c) {
     if (!c.actions.length) return;
@@ -2502,7 +2622,7 @@
   }
 
   // Whole station: summary, every instrument with its 24-hour chart, actions, site visit checklist.
-  function stationDoc(st, a) {
+  function stationDoc(st, a, image) {
     var o = OVERALL[a.overall], doc = new Doc(st.label + ' — station maintenance report');
     var counts = { fault: 0, check: 0 };
     a.components.forEach(function (c) { if (counts[c.result] != null) counts[c.result]++; });
@@ -2514,12 +2634,24 @@
     doc.text('Summary', { weight: 800, size: 15, keepNext: true, after: 6 });
     doc.table([{ label: 'Instrument', w: 0.25, bold: true }, { label: 'Result', w: 0.15 }, { label: 'Main finding', w: 0.6 }],
       a.components.map(function (c) { return [c.name, { pill: c.result }, mainFinding(c)]; }));
+    if (image) {
+      // Short image for sharing: summary, then every recommended action, then stop.
+      var acts = [];
+      a.components.forEach(function (c) {
+        c.actions.forEach(function (x) { if (!acts.some(function (o) { return o.x === x; })) acts.push({ c: c, x: x }); });
+      });
+      doc.space(4).text('Recommended action', { weight: 800, size: 15, keepNext: true, after: 6 });
+      if (!acts.length) doc.text('None. Continue routine maintenance.', { indent: 18, bullet: RES_COLOR.ok });
+      acts.forEach(function (o) { doc.text(o.c.name + ': ' + o.x, { indent: 18, bullet: RES_COLOR[o.c.result] }); });
+      return doc;
+    }
     a.components.forEach(function (c) {
       doc.space(6).section(c.name, c.result);
-      addFindings(doc, c);
-      if (a.rows.length) { doc.space(4); doc.chart(instrumentSpec(a, c.key), { t0: a.from, t1: a.to }, c.key === 'wind' || c.key === 'rain' ? 300 : 180); }
+      addFindings(doc, c, a.rows.length > 0);
+      if (a.rows.length) { doc.chart(instrumentSpec(a, c.key), { t0: a.from, t1: a.to }, c.key === 'wind' || c.key === 'rain' ? 300 : 180); }
       addActions(doc, c);
     });
+    doc.imageEnd();
     doc.space(10).text('Routine site visit checklist', { weight: 800, size: 15, keepNext: true, after: 6 });
     ROUTINE.forEach(function (x) { doc.text(x, { indent: 22, box: true }); });
     doc.space(8).text('Assessment uses the station’s uploaded 10-minute data and WMO-style quality-control tests. ' +
@@ -2533,12 +2665,14 @@
     var c = compOf(a, key), spec = instrumentSpec(a, key);
     var doc = new Doc(st.label + ' — ' + c.name);
     doc.header('Instrument report', c.name + ' — ' + st.label, stationSub(st), c.result, RESULT[c.result].label,
-      ['Period ' + rangeLabel(view.t0, view.t1), 'Assessed ' + stamp(a.to)]);
+      ['Period ' + rangeLabel(view.t0, view.t1), 'Assessed ' + stamp(a.assessedAt || a.to)]);
     doc.stats(statsIn(spec, view.t0, view.t1));
     doc.chart(spec, view, spec.panels.length > 1 ? 400 : 300);
-    doc.text('Findings (' + QC.windowHours + '-hour assessment)', { weight: 800, size: 14, keepNext: true, after: 4 });
+    doc.text('Findings (' + (a.live === false ? 'checks for ' + rangeLabel(a.from, a.to) : QC.windowHours + '-hour assessment') + ')',
+      { weight: 800, size: 14, keepNext: true, after: 4 });
     addFindings(doc, c);
     addActions(doc, c);
+    doc.imageEnd();
     var rows = spec.rowsIn(view.t0, view.t1);
     doc.space(8).text('Readings (' + rows.length + ', newest first)', { weight: 800, size: 14, keepNext: true, after: 6 });
     var n = spec.cols.length;
@@ -2602,7 +2736,7 @@
     var label = button ? button.innerHTML : '';
     if (button) { button.disabled = true; button.textContent = 'Preparing…'; }
     return fontsReady().then(function () {
-      var doc = makeDoc();
+      var doc = makeDoc(kind);
       if (kind === 'pdf') {
         var canvases = doc.pageCanvases();
         return Promise.all(canvases.map(function (cv) {
@@ -2622,12 +2756,15 @@
     });
   }
   function stationFileName(st, a, extra) {
-    return 'AutoWx_' + fileSafe(st.siteId) + '_' + fileSafe(st.label) + '_' + (extra ? fileSafe(extra) + '_' : '') + 'maintenance_' + fileStamp(a.to);
+    var when = a.live === false
+      ? dateOf(a.from) + (a.to - a.from > 25 * HOUR ? '_to_' + dateOf(a.to - 1) : '')   // an earlier period: its dates
+      : fileStamp(a.to);
+    return 'AutoWx_' + fileSafe(st.siteId) + '_' + fileSafe(st.label) + '_' + (extra ? fileSafe(extra) + '_' : '') + 'maintenance_' + when;
   }
   function exportStation(id, kind, button) {
     var st = stationById(id), a = st && maintFor(st);
     if (!a) return;
-    exportDoc(function () { return stationDoc(st, a); }, stationFileName(st, a), kind, button);
+    exportDoc(function (k) { return stationDoc(st, a, k === 'jpeg'); }, stationFileName(st, a), kind, button);
   }
   function exportInstrument(id, key, kind, button, view) {
     var st = stationById(id), z = state.zoom;
@@ -2685,9 +2822,7 @@
         }
       });
     }
-    doc.space(8).text('Checks follow WMO practice for automatic weather station data (WMO-No. 8 and the WMO guidelines on quality control of AWS data). ' +
-      'Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment. ' +
-      'Open a station in AutoWx for its full report with charts.', { size: 10.5, color: PAPER.muted });
+    doc.space(8).text('Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment.', { size: 10.5, color: PAPER.muted });
     return doc;
   }
   function exportNetwork(kind, button) {
@@ -2741,8 +2876,9 @@
     main.innerHTML = err + (state.view === 'board' ? boardView() : state.view === 'maint' ? maintView() : fitting ? fitView() : weatherView());
 
     var sheet = document.getElementById('wn-picker');
-    sheet.hidden = !state.picker;
-    if (state.picker) {
+    sheet.hidden = !state.picker && !state.tie;
+    if (state.tie && !state.picker) sheet.innerHTML = tieView();
+    else if (state.picker) {
       var oldList = sheet.querySelector('.pick-list');
       var scroll = oldList ? oldList.scrollTop : 0;
       sheet.innerHTML = pickerView();
@@ -2864,6 +3000,10 @@
     '#wn-picker[hidden]{display:none}',
     '.sheet{background:var(--card);border-radius:20px;padding:20px;width:min(640px,100%);max-height:86vh;display:flex;flex-direction:column;box-shadow:var(--shadow)}',
     '.sheet-h{display:flex;justify-content:space-between;align-items:center}.sheet-h h2{margin:0;font-size:20px}',
+    '.sheet.tie{width:min(480px,100%)}.tie-list{display:flex;flex-direction:column;gap:8px;margin-top:10px;overflow:auto}',
+    '.tie-row{display:flex;align-items:center;gap:12px;text-align:left;border:1px solid var(--line);background:var(--card);color:var(--text);',
+    'border-radius:12px;padding:10px 14px;cursor:pointer;font:inherit}.tie-row:hover,.tie-row.on{border-color:var(--brand)}',
+    '.tie-n{flex:1;display:flex;flex-direction:column}.tie-n .sid{color:var(--muted);font-size:12.5px}.tie-d{font-weight:800;color:var(--brand)}',
     '.search{position:relative;display:flex;align-items:center}.search .ic{position:absolute;left:12px;color:var(--muted)}',
     '.search input{width:100%;padding:9px 12px 9px 38px;border-radius:10px;border:1px solid var(--line);background:var(--panel)}',
     '.search input:focus{outline:2px solid var(--brand);outline-offset:-1px}',
@@ -2990,6 +3130,11 @@
     '.seg{border:0;background:none;padding:5px 11px;border-radius:8px;font-weight:700;cursor:pointer;color:var(--muted)}',
     '.seg.on{background:var(--card);color:var(--text);box-shadow:var(--shadow)}',
     '.zrange{font-weight:700;font-size:13.5px}.zhint{color:var(--muted);font-size:12.5px;margin-left:auto}',
+    '.zper{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px;padding:8px 10px;background:var(--panel);border-radius:12px}',
+    '.zper-l{display:inline-flex;align-items:center;gap:6px;font-weight:800;margin-right:2px}.zper-l .ic{width:17px;height:17px;color:var(--brand)}',
+    '.zper input,.zper select{font:inherit;font-weight:600;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text)}',
+    '.btn.on{background:#2f6bff;border-color:#2f6bff;color:#fff}.zper-n{color:var(--muted);font-size:12.5px;margin-left:auto}',
+    '.zload{color:var(--brand);font-weight:700;font-size:13px}.zerr{color:var(--danger);font-weight:700;font-size:13px}',
     '.zchart{border:1px solid var(--line);border-radius:12px;overflow:hidden}.zchart canvas{display:block;touch-action:pan-y;cursor:crosshair}',
     '.zlegend{display:flex;gap:6px 16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:8px 2px}',
     '.zlegend span{display:inline-flex;align-items:center;gap:6px}.zlegend i{width:14px;height:4px;border-radius:2px;display:inline-block}',
@@ -3049,9 +3194,11 @@
     }
     if ((el = t.closest('[data-act]'))) {
       var act = el.getAttribute('data-act');
-      if (act === 'pick') { state.picker = true; state.pickerQuery = ''; render(); var q = document.getElementById('wn-pick-q'); if (q) q.focus(); }
+      if (act === 'pick') { state.nearOnly = false; state.tie = null; state.picker = true; state.pickerQuery = ''; render(); var q = document.getElementById('wn-pick-q'); if (q) q.focus(); }
       else if (act === 'close-picker') { state.picker = false; render(); loadShown(); }
-      else if (act === 'locate') { state.view = 'weather'; save(); locate(); }
+      else if (act === 'locate') { state.view = 'weather'; state.nearOnly = true; state.fit = false; save(); locate(true); window.scrollTo(0, 0); }
+      else if (act === 'near-off') { state.nearOnly = false; render(); loadShown(); }
+      else if (act === 'tie-close') { state.tie = null; state.nearOnly = true; render(); loadShown(); }
       else if (act === 'refresh') refresh();
       else if (act === 'maint-scan') scanAll();
       else if (act === 'save-group') { var nm = document.getElementById('wn-group-name'); if (saveGroup(nm && nm.value)) render(); }
@@ -3060,6 +3207,7 @@
       else if (act === 'rep-pdf' || act === 'rep-jpeg') exportStation(state.maint.open, act === 'rep-pdf' ? 'pdf' : 'jpeg', el);
       else if (act === 'net-pdf' || act === 'net-jpeg') exportNetwork(act === 'net-pdf' ? 'pdf' : 'jpeg', el);
       else if (act === 'zoom-close') closeZoom();
+      else if (act === 'zoom-latest' && state.zoom) zoomLatest();
       else if ((act === 'zoom-pdf' || act === 'zoom-jpeg') && state.zoom) exportInstrument(state.zoom.id, state.zoom.key, act === 'zoom-pdf' ? 'pdf' : 'jpeg', el);
       else if (act === 'maint-print') window.print();
       else if (act === 'fit') { state.fit = !state.fit; state.view = 'weather'; save(); render(); window.scrollTo(0, 0); }
@@ -3068,8 +3216,9 @@
     if ((el = t.closest('[data-zoom]'))) { openZoom(state.maint.open, el.getAttribute('data-zoom')); return; }
     if ((el = t.closest('[data-ipdf]'))) { exportInstrument(state.maint.open, el.getAttribute('data-ipdf'), 'pdf', el); return; }
     if ((el = t.closest('[data-ijpeg]'))) { exportInstrument(state.maint.open, el.getAttribute('data-ijpeg'), 'jpeg', el); return; }
+    if ((el = t.closest('[data-zday]')) && state.zoom) { zoomStepDay(+el.getAttribute('data-zday')); return; }
     if ((el = t.closest('[data-zrange]')) && state.zoom) {
-      var za = state.zoom.a, zh = +el.getAttribute('data-zrange') * HOUR;
+      var za = state.zoom.a, zv = el.getAttribute('data-zrange'), zh = zv === 'all' ? za.to - za.from : +zv * HOUR;
       setZoomRange(za.to - zh, za.to); return;
     }
     if ((el = t.closest('[data-zpan]')) && state.zoom) {
@@ -3077,7 +3226,8 @@
       setZoomRange(state.zoom.t0 + zd, state.zoom.t1 + zd); return;
     }
     if (t.id === 'wn-zoom') { closeZoom(); return; }
-    if ((el = t.closest('[data-group-load]'))) { loadGroup(el.getAttribute('data-group-load')); render(); loadShown(); return; }
+    if ((el = t.closest('[data-tie]'))) { chooseTie(el.getAttribute('data-tie')); return; }
+    if ((el = t.closest('[data-group-load]'))) { state.nearOnly = false; loadGroup(el.getAttribute('data-group-load')); render(); loadShown(); return; }
     if ((el = t.closest('[data-group-del]'))) { deleteGroup(el.getAttribute('data-group-del')); render(); return; }
     if ((el = t.closest('[data-scope]'))) { state.scope = el.getAttribute('data-scope'); save(); render(); return; }
     if ((el = t.closest('[data-maint-open]'))) {
@@ -3103,7 +3253,7 @@
         state.selected.unshift(sid);
         state.selected = state.selected.slice(0, CONFIG.maxShown - (state.nearestId ? 1 : 0));
       }
-      state.view = 'weather'; save(); render(); loadShown(); window.scrollTo(0, 0); return;
+      state.nearOnly = false; state.view = 'weather'; save(); render(); loadShown(); window.scrollTo(0, 0); return;
     }
     if ((el = t.closest('[data-filter]'))) { state.board.filter = el.getAttribute('data-filter'); render(); return; }
     if ((el = t.closest('[data-sort]'))) {
@@ -3111,12 +3261,20 @@
       state.board.sort = s.key === k ? { key: k, dir: -s.dir } : { key: k, dir: 1 };
       render(); return;
     }
-    if (t.id === 'wn-picker') { state.picker = false; render(); loadShown(); }
+    if (t.id === 'wn-picker') {
+      if (state.tie) { state.tie = null; render(); loadShown(); return; }
+      state.picker = false; render(); loadShown();
+    }
   });
 
   document.body.addEventListener('change', function (e) {
+    if (state.zoom && (e.target.id === 'wn-zdate' || e.target.id === 'wn-zdays')) {
+      var zdate = document.getElementById('wn-zdate').value, zdays = +document.getElementById('wn-zdays').value;
+      if (zdate) loadZoomPeriod(zdate, zdays);
+      return;
+    }
     if (e.target.id === 'wn-group') {
-      if (e.target.value) { loadGroup(e.target.value); render(); loadShown(); window.scrollTo(0, 0); }
+      if (e.target.value) { state.nearOnly = false; loadGroup(e.target.value); render(); loadShown(); window.scrollTo(0, 0); }
       return;
     }
     var id = e.target.getAttribute && e.target.getAttribute('data-pick');
@@ -3143,6 +3301,7 @@
 
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && state.zoom) { closeZoom(); return; }
+    if (e.key === 'Escape' && state.tie) { state.tie = null; render(); loadShown(); return; }
     if (e.key === 'Escape' && state.picker) { state.picker = false; render(); loadShown(); }
     if (e.key === 'Enter' && e.target.id === 'wn-group-name') { if (saveGroup(e.target.value)) render(); }
   });
