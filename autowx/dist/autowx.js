@@ -1312,6 +1312,11 @@
     gross: { rh: [1, 110] }        // QC gross limits where they differ from display limits (RH 100–110 = over-reading, tested separately)
   };
 
+  // Where the data comes from, printed on every report page.
+  var CSERV_URL = 'https://cserv.panahon.gov.ph';
+  var SOURCE_TEXT = 'Data source: PAGASA Collection System (cserv), uploaded 10-minute automatic weather station data — ';
+  function stationLink(st) { return CSERV_URL + '/admin/aws/' + st.id; }
+  var LIST_LINK = CSERV_URL + '/admin/aws';
   // Shown on the Maintenance page and in every maintenance report (screen, PDF and JPEG).
   var WMO_NOTE = 'Checks follow WMO practice for automatic weather station data (WMO-No. 8 and the WMO guidelines on quality control of AWS data): ' +
     'range, step, persistence and internal-consistency tests on each sensor, plus data completeness, logger clock and power supply. ' +
@@ -1878,6 +1883,7 @@
         'Compare readings with reference instruments; record any sensor change or calibration in the station log.'
       ].map(function (x) { return '<li><span class="box"></span>' + x + '</li>'; }).join('') + '</ul></section>' +
       '<p class="fine">' + WMO_NOTE + '</p>' +
+      '<p class="fine">' + esc(SOURCE_TEXT) + '<a href="' + esc(stationLink(st)) + '" target="_blank" rel="noopener">' + esc(stationLink(st)) + '</a></p>' +
       '<p class="fine">Assessment uses the station’s uploaded 10-minute data and WMO-style quality-control tests. ' +
       'Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment. ' +
       '<span class="no-print">Select an instrument’s chart (or Zoom in) to see its readings in detail and download that instrument’s report.</span></p>' +
@@ -2629,7 +2635,7 @@
         if (cell && typeof cell === 'object') return cell;
         return { lines: wrap(cell == null ? '' : cell, cols[i].w * W - 12, dfont(size, cols[i].bold ? 700 : 400)) };
       });
-      var n = Math.max.apply(null, cells.map(function (c) { return c.lines ? c.lines.length : c.spark ? 3 : 1; }));
+      var n = Math.max.apply(null, cells.map(function (c) { return c.lines ? c.lines.length : 1; }));
       var h = n * lh + 10;
       self.add({ h: h, repeatHead: head, draw: function (ctx, x, y) {
         if (tint) { ctx.fillStyle = tint; ctx.fillRect(x, y, W, h); }
@@ -2638,7 +2644,6 @@
         cells.forEach(function (c, i) {
           var cx = x + xs[i] + 6;
           if (c.pill) pill(ctx, cx, y + 5, RESULT[c.pill] ? RESULT[c.pill].label : OVERALL[c.pill].label, c.pill, 10);
-          else if (c.spark) drawSpark(ctx, cx, y + 5, cols[i].w * W - 12, h - 10, c.spark);
           else if (c.dot) { ctx.fillStyle = RES_COLOR[c.dot]; ctx.beginPath(); ctx.arc(x + xs[i] + cols[i].w * W / 2, y + 5 + lh / 2, 5, 0, 7); ctx.fill(); }
           else {
             ctx.fillStyle = c.color || (cols[i].muted ? PAPER.muted : PAPER.text);
@@ -2675,13 +2680,15 @@
   };
   // Splits blocks into pages; a table header is repeated at the top of a new page.
   Doc.prototype.paginate = function () {
-    var top = DOC.M, bottom = DOC.H - DOC.M - 22 - noteHeight() - 6, pages = [[]], y = top, bl = this.blocks;
+    var top = DOC.M, bottom = DOC.H - DOC.M - 22 - noteHeight() - 6, pages = [[]], y = top, bl = this.blocks, cards = 0, per = this.cardsPerPage;
     for (var i = 0; i < bl.length; i++) {
       var b = bl[i], need = b.h;
+      if (b.cardStart && per && cards >= per && y > top) { pages.push([]); y = top; cards = 0; }   // e.g. two faults per page
+      if (b.cardStart) cards++;
       for (var j = i; bl[j] && bl[j].keepNext && bl[j + 1]; j++) need += bl[j + 1].h;
       need = Math.min(need, bottom - top);
       if (y + need > bottom && y > top) {
-        pages.push([]); y = top;
+        pages.push([]); y = top; cards = b.cardStart ? 1 : 0;
         if (b.repeatHead) { pages[pages.length - 1].push({ b: b.repeatHead, y: y }); y += b.repeatHead.h; }
       }
       pages[pages.length - 1].push({ b: b, y: y }); y += b.h;
@@ -2695,15 +2702,25 @@
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
     return { cv: cv, ctx: ctx };
   }
-  // The WMO statement, printed as a footnote above the page footer.
+  // Footnote above the page footer: the data source (with the cserv link) and the WMO statement.
   var NOTE_LH = 12.5;
   function noteLines() { return wrap(WMO_NOTE, DOC.W - 2 * DOC.M, dfont(9, 600)); }
-  function noteHeight() { return noteLines().length * NOTE_LH + 8; }
-  function footnote(ctx, y) {   // y = top of the footnote
+  function noteHeight() { return (noteLines().length + 1) * NOTE_LH + 10; }
+  function footnote(ctx, y, url) {   // y = top of the footnote; returns where the link is (for the PDF)
     var x = DOC.M;
+    url = url || LIST_LINK;
     ctx.fillStyle = PAPER.grid; ctx.fillRect(x, y, 120, 1);
-    ctx.fillStyle = PAPER.muted; ctx.font = dfont(9, 600); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-    noteLines().forEach(function (ln, i) { ctx.fillText(ln, x, y + 6 + i * NOTE_LH + NOTE_LH / 2); });
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    var sy = y + 6 + NOTE_LH / 2;
+    ctx.font = dfont(9, 700); ctx.fillStyle = PAPER.text; ctx.fillText(SOURCE_TEXT, x, sy);
+    measureCtx.font = dfont(9, 700);
+    var lx = x + measureCtx.measureText(SOURCE_TEXT).width;
+    ctx.fillStyle = '#2457c5'; ctx.fillText(url, lx, sy);
+    var lw = measureCtx.measureText(url).width;
+    ctx.fillRect(lx, sy + 5, lw, 0.8);
+    ctx.font = dfont(9, 600); ctx.fillStyle = PAPER.muted;
+    noteLines().forEach(function (ln, i) { ctx.fillText(ln, x, y + 8 + (i + 1) * NOTE_LH + NOTE_LH / 2); });
+    return { x: lx, y: sy - 7, w: lw, h: 14, url: url };
   }
   function footer(ctx, y, title, page) {
     var x = DOC.M, W = DOC.W - 2 * DOC.M;
@@ -2714,11 +2731,11 @@
     ctx.textAlign = 'left';
   }
   Doc.prototype.pageCanvases = function () {
-    var pages = this.paginate(), title = this.title;
+    var pages = this.paginate(), title = this.title, source = this.source;
     return pages.map(function (items, i) {
       var c = newCanvas(DOC.W, DOC.H);
       items.forEach(function (it) { it.b.draw(c.ctx, DOC.M, it.y); });
-      footnote(c.ctx, DOC.H - DOC.M - 12 - noteHeight());
+      c.cv.links = [footnote(c.ctx, DOC.H - DOC.M - 12 - noteHeight(), source)];
       footer(c.ctx, DOC.H - DOC.M - 8, title, 'Page ' + (i + 1) + ' of ' + pages.length);
       return c.cv;
     });
@@ -2731,7 +2748,7 @@
     if (total * DOC.S > 30000) return this.pageCanvases();
     var c = newCanvas(DOC.W, total), y = DOC.M;
     blocks.forEach(function (b) { b.draw(c.ctx, DOC.M, y); y += b.h; });
-    footnote(c.ctx, y + 12);
+    footnote(c.ctx, y + 12, this.source);
     footer(c.ctx, y + 16 + noteHeight(), this.title, '');
     return [c.cv];
   };
@@ -2884,6 +2901,7 @@
   // Whole station: summary, every instrument with its 24-hour chart, actions, site visit checklist.
   function stationDoc(st, a, image) {
     var o = OVERALL[a.overall], doc = new Doc(st.label + ' — station maintenance report');
+    doc.source = stationLink(st);
     var counts = { fault: 0, check: 0 };
     a.components.forEach(function (c) { if (counts[c.result] != null) counts[c.result]++; });
     doc.header('Station maintenance report', st.label, stationSub(st), a.overall, o.label,
@@ -2924,6 +2942,7 @@
   function instrumentDoc(st, a, key, view) {
     var c = compOf(a, key), spec = instrumentSpec(a, key);
     var doc = new Doc(st.label + ' — ' + c.name);
+    doc.source = stationLink(st);
     doc.header('Instrument report', c.name + ' — ' + st.label, stationSub(st), c.result, RESULT[c.result].label,
       ['Period ' + rangeLabel(view.t0, view.t1), 'Assessed ' + stamp(a.assessedAt || a.to)]);
     doc.stats(statsIn(spec, view.t0, view.t1));
@@ -2952,6 +2971,7 @@
   // Month: daily status grid for every instrument, monthly summary, problem days, monthly charts and actions.
   function monthDoc(st, a, ym, image) {
     var doc = new Doc(st.label + ' — monthly maintenance report, ' + monthName(ym));
+    doc.source = stationLink(st);
     var days = { good: 0, attention: 0, maintenance: 0, offline: 0 };
     a.daily.forEach(function (d) { if (days[d.a.overall] != null) days[d.a.overall]++; });
     var comms = compOf(a, 'comms');
@@ -3159,52 +3179,18 @@
     return list.filter(function (c) { return compLevel(a, c, withCheck) === 'fault'; })
       .concat(list.filter(function (c) { return compLevel(a, c, withCheck) === 'check'; }));
   }
-  // A small graph inside a table cell: the instrument's main reading, with problem times shaded.
-  function drawSpark(ctx, x, y, w, h, o) {
-    var a = o.a, spec = instrumentSpec(a, o.key), s0 = spec.panels[0].series[0];
-    var pts = s0.pts.filter(function (p) { return p.t >= a.from && p.t <= a.to + (s0.barMs || 0); });
-    var t0 = a.from, t1 = a.to;
-    function X(t) { return x + w * (t - t0) / Math.max(1, t1 - t0); }
-    ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
-    ctx.fillStyle = PAPER.panel; ctx.fillRect(x, y, w, h);
-    function band(f, t, col) { var p = Math.max(x, X(f)), q = Math.min(x + w, X(t)); if (q > p) { ctx.fillStyle = col; ctx.fillRect(p, y, Math.max(1, q - p), h); } }
-    spec.gaps.forEach(function (g) { band(g.from, g.to, 'rgba(138,150,168,.28)'); });
-    spec.marks.forEach(function (m) { if (m.to != null) band(m.from, m.to, m.result === 'fault' ? 'rgba(229,72,77,.22)' : 'rgba(240,180,41,.3)'); });
-    if (pts.length < 2) {
-      ctx.fillStyle = PAPER.muted; ctx.font = dfont(9, 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('No data', x + w / 2, y + h / 2); ctx.restore(); return;
-    }
-    var vals = pts.map(function (p) { return p.v; }), lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
-    if (s0.type === 'bar') lo = Math.min(0, lo);
-    if (hi - lo < 1e-6) { lo -= 1; hi += 1; }
-    function Y(v) { return y + h - 3 - (h - 6) * (v - lo) / (hi - lo); }
-    ctx.fillStyle = ctx.strokeStyle = s0.color;
-    if (s0.type === 'bar') {
-      pts.forEach(function (p) { var xa = X(p.t - s0.barMs), xb = X(p.t); if (p.v > 0) ctx.fillRect(xa, Y(p.v), Math.max(1, xb - xa - 0.5), Y(lo) - Y(p.v)); });
-    } else if (s0.type === 'dot') {
-      pts.forEach(function (p) { ctx.fillRect(X(p.t) - 0.75, Y(p.v) - 0.75, 1.5, 1.5); });
-    } else {
-      ctx.lineWidth = 1.3; ctx.beginPath();
-      pts.forEach(function (p, i) { if (!i || p.t - pts[i - 1].t > 2 * TEN_MIN) ctx.moveTo(X(p.t), Y(p.v)); else ctx.lineTo(X(p.t), Y(p.v)); });
-      ctx.stroke();
-    }
-    spec.marks.forEach(function (m) {
-      if (m.to != null) return;
-      var q = null; pts.forEach(function (p) { if (Math.abs(p.t - m.from) < 30000) q = p; });
-      if (q) { ctx.fillStyle = RES_COLOR[m.result]; ctx.beginPath(); ctx.arc(X(q.t), Y(q.v), 1.8, 0, 7); ctx.fill(); }
-    });
-    ctx.restore();
-  }
   // A compact write-up for one problem: heading, graph, then two columns of text.
   function addFaultCard(doc, a, c, level, who) {
     var F = faultFacts(a, c, level), W = DOC.W - 2 * DOC.M, first = doc.blocks.length;
-    doc.space(4).add({ h: 28, keepNext: true, draw: function (ctx, x, y) {
+    doc.space(4);
+    doc.blocks[doc.blocks.length - 1].cardStart = true;
+    doc.add({ h: 28, keepNext: true, draw: function (ctx, x, y) {
       ctx.fillStyle = PILL[level][1]; roundRect(ctx, x, y + 2, W, 24, 7); ctx.fill();
       ctx.fillStyle = PILL[level][0]; ctx.font = dfont(13, 800); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
       ctx.fillText((level === 'fault' ? 'Fault — ' : 'Check — ') + (who ? who + ' · ' : '') + c.name, x + 10, y + 14);
     } });
-    if (a.rows.length) { var spec = instrumentSpec(a, c.key); doc.chart(spec, { t0: a.from, t1: a.to }, spec.panels.length > 1 ? 190 : 140); }
-    var gap = 20, cw = (W - gap) / 2, lh = 14, f = dfont(10.5, 400), fb = dfont(10.5, 800);
+    if (a.rows.length) { var spec = instrumentSpec(a, c.key); doc.chart(spec, { t0: a.from, t1: a.to }, spec.panels.length > 1 ? 175 : 135); }
+    var gap = 20, cw = (W - gap) / 2, lh = 14, f = dfont(10.5, 400), fb = dfont(10.5, 800), MAXL = 13;   // keeps two cards on one A4 page
     function column(sections) {
       var out = [];
       sections.forEach(function (sec) {
@@ -3212,6 +3198,7 @@
         out.push({ t: sec.title, bold: true });
         sec.items.forEach(function (it) { wrap(it, cw - 14, f).forEach(function (ln, k) { out.push({ t: ln, dot: k === 0 ? sec.dot : null }); }); });
       });
+      if (out.length > MAXL) { out = out.slice(0, MAXL); out[MAXL - 1] = { t: out[MAXL - 1].t.replace(/\s*\S*$/, '') + '…' }; }
       return out;
     }
     var left = column([{ title: 'What was found', items: F.what, dot: RES_COLOR[level] }, { title: 'When', items: F.when, dot: PAPER.muted },
@@ -3233,7 +3220,7 @@
     for (var k = first; k < doc.blocks.length; k++) doc.blocks[k].keepNext = k < doc.blocks.length - 1;
   }
   // single: one station, faults only. Otherwise a group: faults and instruments that need checking.
-  // Aims for one A4 page: compact cards with graphs when they fit, otherwise one table row per problem with a small graph.
+  // Each problem is a compact card with its graph; two cards per A4 page.
   function faultDoc(list, title, sub, periodText, single) {
     var withCheck = !single, items = [];
     list.forEach(function (x) { faultyComps(x.a, withCheck).forEach(function (c) { items.push({ x: x, c: c, lv: compLevel(x.a, c, withCheck) }); }); });
@@ -3242,6 +3229,7 @@
     var r0 = list[0] && list[0].a;
     function start() {
       var doc = new Doc(title + (single ? ' — fault report, ' : ' — fault and check report, ') + periodText);
+      doc.source = single && list[0] ? stationLink(list[0].st) : LIST_LINK;
       doc.a4Images = true;   // JPEG as A4 pages, ready to print on bond paper
       var pillText = nFaults ? nFaults + ' fault' + (nFaults > 1 ? 's' : '') + (nChecks ? ' · ' + nChecks + ' to check' : '')
         : nChecks ? nChecks + ' to check' : single ? 'No faults' : 'No problems';
@@ -3263,43 +3251,26 @@
       return doc;
     }
     var doc = start();
+    doc.cardsPerPage = 2;   // two faults per A4 page
     if (!items.length) {
       doc.callout(single ? 'No faults were found at this station in this period. Items needing a check (not faults) are left out of this report.'
         : 'No faults and no instruments needing a check were found at these stations in this period.', 'ok');
       return finish(doc);
     }
-    // 1. Cards with graphs, if everything fits on one page.
-    items.forEach(function (it) { addFaultCard(doc, it.x.a, it.c, it.lv, single ? '' : it.x.st.label); });
-    finish(doc);
-    if (doc.paginate().length === 1) return doc;
-    // 2. Otherwise one row per problem (with status and a small graph). Tighter versions are tried until it fits one page.
-    var tries = [{ size: 9.5, acts: 2, max: 6 }, { size: 9, acts: 1, max: 3 }, { size: 8.5, acts: 1, max: 2 }];
-    for (var ti = 0; ti < tries.length; ti++) {
-      var o = tries[ti];
-      doc = start();
-      var cols = (single ? [] : [{ label: 'Station', w: 0.15, bold: true }]).concat([{ label: 'Instrument', w: 0.13, bold: true }, { label: 'Result', w: 0.085 },
-        { label: 'Graph', w: 0.17 }, { label: 'What was found · when', w: single ? 0.33 : 0.255 }, { label: 'Recommended action', w: single ? 0.285 : 0.21 }]);
-      var Wt = DOC.W - 2 * DOC.M;
-      var cell = function (text, colIndex, bold, max) {   // wrapped and cut to max lines
-        max = max || o.max;
-        var lines = wrap(text, cols[colIndex].w * Wt - 12, dfont(o.size, bold ? 700 : 400));
-        if (lines.length > max) { lines = lines.slice(0, max); lines[max - 1] = lines[max - 1].replace(/\s*\S*$/, '') + '…'; }
-        return { lines: lines };
-      };
-      var off = single ? 0 : 1;
-      doc.table(cols, items.map(function (it) {
-        var F = faultFacts(it.x.a, it.c, it.lv);
-        var acts = F.actions.slice(0, o.acts).map(function (t, k) { return (o.acts > 1 && F.actions.length > 1 ? (k + 1) + '. ' : '') + t; }).join('\n');
-        return { cells: (single ? [] : [cell(it.x.st.label + '\n' + it.x.st.siteId + ' · ' + OVERALL[it.x.a.overall].label, 0, true, Math.max(4, o.max))])
-          .concat([cell(it.c.name, off, true), { pill: it.lv }, { spark: { a: it.x.a, key: it.c.key } }, cell(F.what[0] + '\n' + F.when[0], off + 3), cell(acts, off + 4)]),
-          tint: it.lv === 'fault' ? '#fdf1f1' : '#fffaf0' };
-      }), { size: o.size });
-      doc.text('Graph: the main reading over the period; shading marks problem times (red fault, yellow check, grey no data). ' +
-        'Open a station in AutoWx for its full report with causes and repair checks.', { size: 9, color: PAPER.muted, after: 2 });
-      finish(doc);
-      if (doc.paginate().length === 1) break;
+    if (!single) {
+      var withProblems = list.filter(function (x) { return faultyComps(x.a, true).length; });
+      doc.text('Stations needing maintenance or attention', { weight: 800, size: 14, keepNext: true, after: 4 });
+      doc.table([{ label: 'Station', w: 0.26, bold: true }, { label: 'ID', w: 0.07, muted: true }, { label: 'Status', w: 0.19 }, { label: 'Faults', w: 0.24 },
+        { label: 'To check', w: 0.24 }],
+        withProblems.map(function (x) {
+          var fc = faultyComps(x.a, true), cw = 0.24 * (DOC.W - 2 * DOC.M) - 12, f = dfont(10.5, 400);
+          function names(lv) { return fc.filter(function (c) { return compLevel(x.a, c, true) === lv; }).map(function (c) { return c.name; }).join(', ') || '—'; }
+          return { cells: [x.st.label, x.st.siteId, { pill: x.a.overall }, { lines: wrap(names('fault'), cw, f), color: '#b4232a' },
+            { lines: wrap(names('check'), cw, f), color: '#9a5b00' }] };
+        }), { size: 10.5 });
     }
-    return doc;
+    items.forEach(function (it) { addFaultCard(doc, it.x.a, it.c, it.lv, single ? '' : it.x.st.label); });
+    return finish(doc);
   }
   // stations: list of stations to check; group: true for the Maintenance page (several stations).
   function exportFaults(stations, kind, button, group) {
@@ -3429,7 +3400,7 @@
       var fc = faultyComps(x.a, withCheck);
       function names(lv) { return fc.filter(function (c) { return compLevel(x.a, c, withCheck) === lv; }).map(function (c) { return c.name; }); }
       stations.push([x.st.label, x.st.siteId, names('fault').length, names('fault').join(', ') || 'None', names('check').length, names('check').join(', ') || 'None',
-        x.a.from, x.a.to, OVERALL[x.a.overall].label]);
+        x.a.from, x.a.to, OVERALL[x.a.overall].label, stationLink(x.st)]);
       fc.forEach(function (c) {
         var lv = compLevel(x.a, c, withCheck), res = RESULT[lv].label, F = faultFacts(x.a, c, lv), i = x.a.components.indexOf(c);
         faults.push([x.st.label, x.st.siteId, c.name, res, periodText, F.what.join('\n'), F.when.join('\n'), F.evidence, F.causes.join('\n'), F.effect,
@@ -3458,10 +3429,16 @@
         { label: 'Check after repair', w: 40 }], rows: faults },
       { name: 'Stations', cols: [{ label: 'Station', w: 26 }, { label: 'Station ID', w: 10 }, { label: 'Faults', w: 8 }, { label: 'Faulty instruments', w: 36 },
         { label: 'To check', w: 9 }, { label: 'Instruments to check', w: 36 }, { label: 'Checked from', w: 22, date: true }, { label: 'Checked to', w: 22, date: true },
-        { label: 'Overall', w: 18 }], rows: stations },
+        { label: 'Overall', w: 18 }, { label: 'cserv page', w: 44 }], rows: stations },
       { name: withCheck ? 'Problem times' : 'Fault times', cols: [{ label: 'Station', w: 26 }, { label: 'Station ID', w: 10 }, { label: 'Instrument', w: 18 },
         { label: 'Result', w: 9 }, { label: 'What', w: 44 }, { label: 'From', w: 22, date: true }, { label: 'To', w: 22, date: true }, { label: 'Hours', w: 8 },
-        { label: 'Readings', w: 10 }], rows: times }
+        { label: 'Readings', w: 10 }], rows: times },
+      { name: 'Source', cols: [{ label: 'Item', w: 24 }, { label: 'Details', w: 110 }], rows: [
+        ['Report', (withCheck ? 'Fault and check report' : 'Fault report') + ', ' + periodText],
+        ['Made', stamp(Date.now())],
+        ['Data source', 'PAGASA Collection System (cserv), uploaded 10-minute automatic weather station data'],
+        ['Link', list.length === 1 && !withCheck ? stationLink(list[0].st) : LIST_LINK],
+        ['Checks', WMO_NOTE]] }
     ]);
   }
 
@@ -3508,7 +3485,12 @@
     obj(2, ['<< /Type /Pages /Count ' + n + ' /Kids [' + images.map(function (_, i) { return (3 + 3 * i) + ' 0 R'; }).join(' ') + '] >>']);
     images.forEach(function (im, i) {
       var p = 3 + 3 * i, cs = 'q ' + W + ' 0 0 ' + H + ' 0 0 cm /Im' + i + ' Do Q';
-      obj(p, ['<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + W + ' ' + H + '] /Resources << /XObject << /Im' + i + ' ' + (p + 2) + ' 0 R >> >> /Contents ' + (p + 1) + ' 0 R >>']);
+      var k = W / DOC.W, annots = (im.links || []).map(function (l) {   // layout px → PDF points (origin bottom-left)
+        var r = [l.x * k, H - (l.y + l.h) * k, (l.x + l.w) * k, H - l.y * k].map(function (v) { return v.toFixed(2); });
+        return '<< /Type /Annot /Subtype /Link /Rect [' + r.join(' ') + '] /Border [0 0 0] /A << /S /URI /URI (' + l.url.replace(/[()\\]/g, '') + ') >> >>';
+      }).join(' ');
+      obj(p, ['<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + W + ' ' + H + '] /Resources << /XObject << /Im' + i + ' ' + (p + 2) + ' 0 R >> >> /Contents ' + (p + 1) + ' 0 R' +
+        (annots ? ' /Annots [' + annots + ']' : '') + ' >>']);
       obj(p + 1, ['<< /Length ' + cs.length + ' >>\nstream\n' + cs + '\nendstream']);
       obj(p + 2, ['<< /Type /XObject /Subtype /Image /Width ' + im.w + ' /Height ' + im.h + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' +
         im.bytes.length + ' >>\nstream\n', im.bytes, '\nendstream']);
@@ -3538,7 +3520,7 @@
       if (kind === 'pdf') {
         var canvases = doc.pageCanvases();
         return Promise.all(canvases.map(function (cv) {
-          return toJpeg(cv).then(function (b) { return b.arrayBuffer(); }).then(function (buf) { return { bytes: new Uint8Array(buf), w: cv.width, h: cv.height }; });
+          return toJpeg(cv).then(function (b) { return b.arrayBuffer(); }).then(function (buf) { return { bytes: new Uint8Array(buf), w: cv.width, h: cv.height, links: cv.links }; });
         })).then(function (imgs) { saveFile(makePdf(imgs), baseName + '.pdf'); });
       }
       var list = doc.longCanvases();
