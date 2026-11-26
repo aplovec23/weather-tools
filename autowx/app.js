@@ -1777,6 +1777,7 @@
       '<button class="btn sm" data-act="gmonth-pdf"' + (counts.all ? '' : ' disabled') + '>' + icon('download') + 'PDF</button>' +
       '<button class="btn sm" data-act="gmonth-jpeg"' + (counts.all ? '' : ' disabled') + '>' + icon('download') + 'JPEG</button>' +
       '<span class="dl-n">Choose a group or Selected above to report on just those stations.</span></div>' +
+      faultBar(true, counts.all) +
       '<div class="table-wrap"><table class="mtable"><thead>' + head + '</thead><tbody>' +
       (body || '<tr><td colspan="12" class="muted center">No stations match.</td></tr>') + '</tbody></table></div>' +
       '<p class="fine">' + WMO_NOTE + '</p></div>';
@@ -1857,6 +1858,7 @@
       '<input type="month" id="wn-month" value="' + (state.maint.month || dateOf(Date.now()).slice(0, 7)) + '" max="' + dateOf(Date.now()).slice(0, 7) + '" aria-label="Month">' +
       '<button class="btn sm" data-act="month-pdf">' + icon('download') + 'PDF</button><button class="btn sm" data-act="month-jpeg">' + icon('download') + 'JPEG</button>' +
       '<span class="dl-n">Loads the whole month from cserv and checks each day; it takes a little longer.</span></div>' +
+      faultBar(false, 1) +
       '<article class="card">' +
       '<header class="rep-h"><div><div class="tagline">Station maintenance report</div><h2>' + esc(st.label) + '</h2>' +
       '<div class="sub">Station ' + esc(st.siteId) + (st.lat != null ? ' · approx. ' + st.lat.toFixed(3) + '°N, ' + st.lon.toFixed(3) + '°E' : '') + '</div></div>' +
@@ -2741,6 +2743,123 @@
     if (!c.findings.length) doc.text(c.result === 'na' ? 'No data to test.' : 'No findings.', { color: PAPER.muted, indent: 18, keepNext: keep });
     c.findings.forEach(function (f) { doc.text(f.text, { indent: 18, bullet: RES_COLOR[f.result], keepNext: keep }); });
   }
+  // ---- fault details ----
+  // For each instrument: likely causes, what the fault means for the data, and how to confirm the repair.
+  var FAULT_INFO = {
+    comms: { causes: ['No mobile signal, or the SIM is out of load or data', 'Modem or antenna fault; loose or damaged antenna cable',
+        'Logger stopped (power loss or crash), so nothing was sent', 'Transmission schedule or server settings changed'],
+      effect: 'Missing records cannot be used. If the logger kept recording, download its stored data to fill the gap.',
+      verify: ['Records arrive every 10 minutes for at least 24 hours', 'The gap is filled from the logger download where possible'] },
+    clock: { causes: ['Logger clock drifted or was reset (clock battery flat)', 'Wrong date, time or time zone set after maintenance', 'Time sync (GPS/NTP) not working'],
+      effect: 'Readings may be filed under the wrong time or date, which shifts daily totals and extremes.',
+      verify: ['Logger time matches Philippine Standard Time within 1 minute', 'New records fall exactly on the 10-minute marks'] },
+    power: { causes: ['Battery at the end of its life and no longer holding charge', 'Solar panel dirty, shaded or tilted wrongly',
+        'Charge controller or fuse fault', 'Loose or corroded power wiring'],
+      effect: 'Low voltage can make sensors read wrongly, and the logger may shut down and leave gaps.',
+      verify: ['Battery stays above ' + QC.battery.check + ' V through the night', 'Daytime voltage rises above ' + QC.battery.charged + ' V (charging seen)'] },
+    temp: { causes: ['Temperature probe failed or drifted', 'Probe cable or connector damaged or wet', 'Radiation shield blocked or damaged', 'Logger channel or wiring fault'],
+      effect: 'Temperature in the flagged period should not be used for records, heat index or warnings.',
+      verify: ['Readings rise and fall normally with the day–night cycle', 'Agrees with a reference thermometer within 0.3 °C'] },
+    rh: { causes: ['Humidity sensor wet, dirty or saturated', 'Sensor filter blocked', 'Sensor aged or out of calibration', 'Cable or connector fault'],
+      effect: 'Humidity, dew point and heat index from this station are unreliable in the flagged period.',
+      verify: ['Humidity stays within 0–100% and drops in the afternoon', 'Agrees with a reference psychrometer within 3%'] },
+    pressure: { causes: ['Barometer sensor fault or drift', 'Pressure port blocked', 'Wrong station elevation setting', 'Cable or connection fault'],
+      effect: 'Pressure in the flagged period should not be used for weather maps or tropical cyclone monitoring.',
+      verify: ['Pressure shows the normal twice-daily rise and fall', 'Agrees with the traveling standard barometer within 0.5 hPa'] },
+    wind: { causes: ['Anemometer or vane bearings worn or jammed', 'Debris, insects or a nest blocking the sensor', 'Vane loose on its shaft or misaligned',
+        'Cable or logger input fault'],
+      effect: 'Wind speed and direction in the flagged period are not usable for warnings or records.',
+      verify: ['Cups spin and the vane turns freely by hand', 'Speed and direction vary normally with the weather'] },
+    rain: { causes: ['Funnel or tipping bucket blocked (debris, insects, nests)', 'Gauge not level', 'Reed switch or cable fault giving false tips',
+        'Logger rain counter set wrongly'],
+      effect: 'Rainfall in the flagged period is unreliable and should not be used for rainfall warnings or records.',
+      verify: ['A field calibration with a known volume of water gives the right total', 'No tips are recorded in dry, sunny weather'] },
+    solar: { causes: ['Pyranometer dome dirty or covered', 'Sensor not level or shaded', 'Sensor offset or cable fault', 'Logger clock wrong (sunlight recorded at night)'],
+      effect: 'Solar radiation in the flagged period is unreliable.',
+      verify: ['Readings are near 0 at night and form a smooth curve by day', 'Midday values are reasonable for the sky conditions'] }
+  };
+  // When the fault was seen: flagged periods, flagged readings, or (monthly) the days it was found.
+  function faultWhen(a, c, i) {
+    var out = [];
+    if (a.daily) {
+      var days = a.daily.filter(function (d) { return d.a.components[i].result === 'fault'; });
+      if (days.length) {
+        out.push('Fault found on ' + days.length + ' of ' + a.daily.length + ' days: ' + days.map(function (d) { return phtDate(d.from).getUTCDate(); }).join(', ') + ' ' +
+          MONTH_SHORT[phtDate(days[0].from).getUTCMonth()] + '.');
+      }
+    }
+    var marks = (c.marks || []).filter(function (m) { return m.result === 'fault'; });
+    marks.filter(function (m) { return m.to != null; }).forEach(function (m) { out.push(m.label + ': ' + rangeLabel(m.from, m.to) + ' (' + hrs(m.to - m.from) + ').'); });
+    var byLabel = {};
+    marks.filter(function (m) { return m.to == null; }).forEach(function (m) { (byLabel[m.label] = byLabel[m.label] || []).push(m.from); });
+    Object.keys(byLabel).forEach(function (k) {
+      var ts = byLabel[k].sort(function (x, y) { return x - y; });
+      out.push(k + ': ' + ts.length + ' reading' + (ts.length > 1 ? 's, from ' + stamp(ts[0]) + ' to ' + stamp(ts[ts.length - 1]) : ' at ' + stamp(ts[0])) + '.');
+    });
+    if (!out.length) out.push('During the checked period, ' + rangeLabel(a.from, a.to) + '.');
+    return out;
+  }
+  // Everything known about one faulty instrument (shared by the PDF/JPEG write-up and the Excel workbook).
+  function faultFacts(a, c) {
+    var i = a.components.indexOf(c), info = FAULT_INFO[c.key];
+    var what = c.findings.filter(function (f) { return f.result === 'fault'; }).map(function (f) { return f.text; });
+    if (a.daily) {
+      a.daily.forEach(function (d) {
+        d.a.components[i].findings.forEach(function (f) {
+          var t = dayLabel(d.from) + ': ' + f.text;
+          if (f.result === 'fault' && what.length < 4 && what.indexOf(t) === -1 && what.indexOf(f.text) === -1) what.push(t);
+        });
+      });
+    }
+    if (!what.length) what = c.findings.map(function (f) { return f.text; });
+    var acts = c.actions.slice();
+    if (a.daily) a.daily.forEach(function (d) { d.a.components[i].actions.forEach(function (x) { if (acts.indexOf(x) === -1) acts.push(x); }); });
+    return {
+      what: what, when: faultWhen(a, c, i),
+      evidence: a.rows.length && c.key !== 'clock' ? statsIn(instrumentSpec(a, c.key), a.from, a.to).map(function (x) { return x[0] + ' ' + x[1]; }).join('  ·  ') : '',
+      causes: info.causes, effect: info.effect, actions: acts, verify: info.verify
+    };
+  }
+  // A full write-up for one faulty instrument. signoff adds lines to record the repair (PDF).
+  function addFaultDetail(doc, a, c, signoff) {
+    var F = faultFacts(a, c);
+    doc.space(6).add({ h: 32, keepNext: true, draw: function (ctx, x, y) {
+      var W = DOC.W - 2 * DOC.M;
+      ctx.fillStyle = PILL.fault[1]; roundRect(ctx, x, y + 2, W, 28, 8); ctx.fill();
+      ctx.fillStyle = PILL.fault[0]; ctx.font = dfont(14, 800); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      ctx.fillText('Fault — ' + c.name, x + 12, y + 16);
+    } });
+    function head(t) { doc.text(t, { weight: 800, size: 12, keepNext: true, after: 1 }); }
+    head('What was found');
+    F.what.forEach(function (t) { doc.text(t, { indent: 18, bullet: RES_COLOR.fault, size: 12 }); });
+    head('When');
+    F.when.forEach(function (t) { doc.text(t, { indent: 18, bullet: PAPER.muted, size: 12 }); });
+    if (F.evidence) { head('Evidence (' + (a.daily ? 'whole period, day by day' : 'checked period') + ')'); doc.text(F.evidence, { indent: 18, size: 12 }); }
+    head('Likely causes');
+    F.causes.forEach(function (t) { doc.text(t, { indent: 18, bullet: '#f07f1f', size: 12 }); });
+    head('Effect on the data');
+    doc.text(F.effect, { indent: 18, size: 12 });
+    if (F.actions.length) {
+      head('Recommended action');
+      F.actions.forEach(function (t, k) { doc.text((k + 1) + '. ' + t, { indent: 18, size: 12 }); });
+    }
+    head('Check after repair');
+    F.verify.forEach(function (t) { doc.text(t, { indent: 22, box: true, size: 12 }); });
+    if (signoff) {
+      doc.text('Action taken: ____________________________________________________________', { size: 11.5, color: PAPER.muted, before: 0 });
+      doc.text('Date fixed: ________________     Technician: ______________________     Signature: ______________', { size: 11.5, color: PAPER.muted, after: 8 });
+    }
+  }
+  // All faulty instruments of a station (or month), under one heading.
+  function addFaultDetails(doc, a, signoff) {
+    var faulty = a.components.filter(function (c, i) {
+      return c.result === 'fault' || (a.daily && a.daily.some(function (d) { return d.a.components[i].result === 'fault'; }));
+    });
+    if (!faulty.length) return false;
+    doc.space(6).text('Fault details (' + faulty.length + ')', { weight: 800, size: 15, keepNext: true, after: 2 });
+    faulty.forEach(function (c) { addFaultDetail(doc, a, c, signoff); });
+    return true;
+  }
   function addActions(doc, c) {
     if (!c.actions.length) return;
     doc.text('Recommended action', { weight: 800, size: 12, keepNext: true, after: 2 });
@@ -2760,6 +2879,7 @@
     doc.text('Summary', { weight: 800, size: 15, keepNext: true, after: 6 });
     doc.table([{ label: 'Instrument', w: 0.25, bold: true }, { label: 'Result', w: 0.15 }, { label: 'Main finding', w: 0.6 }],
       a.components.map(function (c) { return [c.name, { pill: c.result }, mainFinding(c)]; }));
+    addFaultDetails(doc, a, !image);
     if (image) {
       // Short image for sharing: summary, then every recommended action, then stop.
       var acts = [];
@@ -2802,7 +2922,7 @@
     doc.text('Findings (' + (a.live === false ? 'checks for ' + rangeLabel(a.from, a.to) : QC.windowHours + '-hour assessment') + ')',
       { weight: 800, size: 14, keepNext: true, after: 4 });
     addFindings(doc, c);
-    addActions(doc, c);
+    if (c.result === 'fault') addFaultDetail(doc, a, c, true); else addActions(doc, c);
     doc.imageEnd();
     var tb = spec.table(view.t0, view.t1), rows = tb.rows;
     doc.space(8).text(tb.daily ? 'Daily summary (' + rows.length + ' days, newest first)' : 'Readings (' + rows.length + ', newest first)',
@@ -2837,6 +2957,7 @@
         a.daily.forEach(function (d) { n[d.a.components[i].result]++; });
         return [c.name, { pill: c.result }, String(n.ok), String(n.check), String(n.fault), String(n.na), mainFinding(c)];
       }), { size: 11 });
+    addFaultDetails(doc, a, !image);
     // Actions from the whole month and from each problem day, without repeats.
     function actionsFor(c, i) {
       var acts = c.actions.slice();
@@ -2987,6 +3108,244 @@
       button.disabled = false; button.innerHTML = label;
       alert(err instanceof SignedOut ? 'You have been signed out of cserv. Sign in again, then reopen AutoWx.' : 'Could not make the report: ' + ((err && err.message) || err));
     });
+  }
+
+  // ---- fault report: only faults, for a chosen period ----
+  var FAULT_PERIODS = [['1h', 'Last hour', 1], ['3h', 'Last 3 hours', 3], ['6h', 'Last 6 hours', 6], ['12h', 'Last 12 hours', 12],
+    ['24h', 'Last 24 hours', 24], ['7d', 'Last 7 days', 0], ['month', 'Whole month', 0]];
+  function faultRange(code, ym) {
+    var now = Date.now();
+    if (code === 'month') return periodRange(ym + '-01', 'month');
+    if (code === '7d') return { from: dayStart(dateOf(now)) - 6 * 24 * HOUR, to: now };   // today and the 6 days before
+    var h = FAULT_PERIODS.filter(function (x) { return x[0] === code; })[0][2];
+    return { from: now - h * HOUR, to: now };
+  }
+  function faultPeriodLabel(code, ym) {
+    return code === 'month' ? monthName(ym) : FAULT_PERIODS.filter(function (x) { return x[0] === code; })[0][1].toLowerCase();
+  }
+  // Check one station for a period (uses the 24-hour data already loaded when it is fresh).
+  function assessFor(st, r) {
+    var d = state.details[st.id], span = r.to - r.from;
+    var fresh = d && d.rows && d.at && Date.now() - d.at < 15 * 60000 && span <= 24 * HOUR;
+    return (fresh ? Promise.resolve(d.rows) : fetchRange(st.id, r.from, r.to)).then(function (rows) {
+      var a = assessStation(st, rows, r);
+      if (span > 50 * HOUR) a.daily = dailyAssess(st, rows, r.from, r.to);
+      return a;
+    });
+  }
+  function faultyComps(a) {
+    return a.components.filter(function (c, i) {
+      return c.result === 'fault' || (a.daily && a.daily.some(function (d) { return d.a.components[i].result === 'fault'; }));
+    });
+  }
+  function faultDoc(list, title, sub, periodText, single) {
+    var withFaults = list.filter(function (x) { return faultyComps(x.a).length; });
+    var nFaults = withFaults.reduce(function (n, x) { return n + faultyComps(x.a).length; }, 0);
+    var doc = new Doc(title + ' — fault report, ' + periodText);
+    var r0 = list[0] && list[0].a;
+    doc.header('Fault report', title, sub, nFaults ? 'fault' : 'ok', nFaults ? nFaults + ' fault' + (nFaults > 1 ? 's' : '') : 'No faults',
+      ['Period: ' + periodText, r0 ? rangeLabel(r0.from, r0.to) : '', 'Report made ' + stamp(Date.now())]);
+    if (!single) {
+      doc.stats([['Stations checked', String(list.length)], ['With faults', String(withFaults.length)], ['Faulty instruments', String(nFaults)],
+        ['No faults', String(list.length - withFaults.length)]]);
+    }
+    if (!nFaults) {
+      doc.callout('No faults were found ' + (single ? 'at this station' : 'at these stations') + ' in this period. Items needing a check (not faults) are left out of this report.', 'ok');
+      return doc;
+    }
+    if (single) {
+      faultyComps(list[0].a).forEach(function (c) { addFaultDetail(doc, list[0].a, c, true); });
+    } else {
+      doc.text('Stations with faults', { weight: 800, size: 15, keepNext: true, after: 6 });
+      doc.table([{ label: 'Station', w: 0.26, bold: true }, { label: 'ID', w: 0.07, muted: true }, { label: 'Faulty instruments', w: 0.27 }, { label: 'Main fault', w: 0.4 }],
+        withFaults.map(function (x) {
+          var fc = faultyComps(x.a);
+          return [x.st.label, x.st.siteId, fc.map(function (c) { return c.name; }).join(', '), mainFinding(fc[0])];
+        }), { size: 11 });
+      withFaults.forEach(function (x) {
+        doc.space(10).add({ h: 34, keepNext: true, draw: function (ctx, px, py) {
+          ctx.fillStyle = PAPER.text; ctx.font = dfont(17, 800); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+          ctx.fillText(x.st.label + '  ·  Station ' + x.st.siteId, px, py + 16);
+        } });
+        faultyComps(x.a).forEach(function (c) { addFaultDetail(doc, x.a, c, true); });
+      });
+      var clean = list.filter(function (x) { return !faultyComps(x.a).length; });
+      if (clean.length) doc.space(6).text('No faults: ' + clean.map(function (x) { return x.st.label; }).join(', ') + '.', { size: 11.5, color: PAPER.muted });
+    }
+    doc.space(6).text('This report lists faults only. Items rated Check are left out; see the station maintenance report for those.', { size: 10.5, color: PAPER.muted });
+    return doc;
+  }
+  // stations: list of stations to check; group: true for the Maintenance page (several stations).
+  function exportFaults(stations, kind, button, group) {
+    var code = state.maint.fperiod || '24h', ym = state.maint.fmonth || dateOf(Date.now()).slice(0, 7);
+    var r = faultRange(code, ym);
+    if (r.from >= r.to) { alert('That month has not started yet.'); return; }
+    if (!stations.length) return;
+    var long = r.to - r.from > 24 * HOUR;
+    if (group && long && stations.length > 20 &&
+      !confirm('This loads ' + faultPeriodLabel(code, ym) + ' of data for ' + stations.length + ' stations, which can take several minutes. Continue?')) return;
+    var label = button.innerHTML, queue = stations.slice(), done = 0, out = [], failed = [];
+    button.disabled = true;
+    function show() { button.textContent = stations.length > 1 ? 'Checking ' + done + ' of ' + stations.length + '…' : 'Checking…'; }
+    show();
+    function next() {
+      if (!queue.length) return Promise.resolve();
+      var st = queue.shift();
+      return assessFor(st, r).then(function (a) { out.push({ st: st, a: a }); }).catch(function (err) {
+        if (err instanceof SignedOut) { queue.length = 0; throw err; }
+        failed.push(st.label);
+      }).then(function () { done++; show(); return next(); });
+    }
+    Promise.all([next(), next()]).then(function () {
+      button.disabled = false; button.innerHTML = label;
+      if (failed.length) alert('Could not load ' + failed.length + ' station(s): ' + failed.join(', ') + '. The report leaves them out.');
+      if (!out.length) return;
+      out.sort(function (x, y) { return faultyComps(y.a).length - faultyComps(x.a).length || x.st.label.localeCompare(y.st.label); });
+      var cur = currentGroup(), desc = cur ? cur.name : state.scope === 'selected' ? 'Selected stations' : 'All stations';
+      var periodText = faultPeriodLabel(code, ym);
+      var title = group ? desc : out[0].st.label, sub = group ? out.length + ' station' + (out.length === 1 ? '' : 's') : stationSub(out[0].st);
+      var tag = code === 'month' ? ym : code === '7d' ? 'last7days' : 'last' + code;
+      var base = 'AutoWx_' + (group ? fileSafe(desc) : fileSafe(out[0].st.siteId) + '_' + fileSafe(out[0].st.label)) + '_faults_' + tag +
+        (code === 'month' ? '' : '_' + fileStamp(Date.now()));
+      if (kind === 'xlsx') { saveFile(faultWorkbook(out, periodText), base + '.xlsx'); return; }
+      return exportDoc(function () { return faultDoc(out, title, sub, periodText, !group); },
+        'AutoWx_' + (group ? fileSafe(desc) : fileSafe(out[0].st.siteId) + '_' + fileSafe(out[0].st.label)) + '_faults_' + tag +
+        (code === 'month' ? '' : '_' + fileStamp(Date.now())), kind, button);
+    }).catch(function (err) {
+      button.disabled = false; button.innerHTML = label;
+      alert(err instanceof SignedOut ? 'You have been signed out of cserv. Sign in again, then reopen AutoWx.' : 'Could not make the report: ' + ((err && err.message) || err));
+    });
+  }
+  // ---- Excel workbook (.xlsx), written directly: a zip of a few XML files ----
+  var CRC_TABLE = (function () {
+    var t = [];
+    for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+    return t;
+  })();
+  function crc32(b) { var c = 0xFFFFFFFF; for (var i = 0; i < b.length; i++) c = CRC_TABLE[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function makeZip(files) {   // files: [{name, data (text)}], stored without compression
+    var enc = new TextEncoder(), parts = [], central = [], offset = 0;
+    function u16(v) { return [v & 255, (v >>> 8) & 255]; }
+    function u32(v) { return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]; }
+    files.forEach(function (f) {
+      var name = enc.encode(f.name), data = enc.encode(f.data), crc = crc32(data);
+      var common = [].concat(u16(20), u16(0), u16(0), u16(0), u16(0x21), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0));
+      var local = new Uint8Array([].concat(u32(0x04034b50), common));
+      parts.push(local, name, data);
+      central.push(new Uint8Array([].concat(u32(0x02014b50), u16(20), common, u16(0), u16(0), u16(0), u32(0), u32(offset))), name);
+      offset += local.length + name.length + data.length;
+    });
+    var size = central.reduce(function (n, b) { return n + b.length; }, 0);
+    var end = new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length), u32(size), u32(offset), u16(0)));
+    return new Blob(parts.concat(central, [end]), { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
+  function xmlEsc(v) {
+    return String(v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+      .replace(/[&<>"]/g, function (ch) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]; });
+  }
+  function colName(i) { var s = ''; i++; while (i) { var m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; }
+  // sheet = {name, cols: [{label, w, date}], rows: [[text | number | ms date]]}. Styles: 1 header, 2 text, 3 date/time.
+  function sheetXml(sh) {
+    var all = [sh.cols.map(function (c) { return c.label; })].concat(sh.rows);
+    var x = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
+      '<cols>' + sh.cols.map(function (c, i) { return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + c.w + '" customWidth="1"/>'; }).join('') + '</cols><sheetData>';
+    all.forEach(function (row, ri) {
+      x += '<row r="' + (ri + 1) + '">' + row.map(function (v, ci) {
+        var ref = colName(ci) + (ri + 1);
+        if (v == null || v === '') return '';
+        if (ri && sh.cols[ci].date && typeof v === 'number') return '<c r="' + ref + '" s="3"><v>' + ((v + 8 * HOUR) / 86400000 + 25569) + '</v></c>';
+        if (typeof v === 'number') return '<c r="' + ref + '" s="2"><v>' + v + '</v></c>';
+        return '<c r="' + ref + '" t="inlineStr" s="' + (ri ? 2 : 1) + '"><is><t xml:space="preserve">' + xmlEsc(v) + '</t></is></c>';
+      }).join('') + '</row>';
+    });
+    return x + '</sheetData></worksheet>';
+  }
+  function makeXlsx(sheets) {
+    var ns = 'http://schemas.openxmlformats.org/', files = [
+      { name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="' + ns + 'package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+        sheets.map(function (_, i) { return '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'; }).join('') +
+        '</Types>' },
+      { name: '_rels/.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="' + ns + 'package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="' + ns + 'officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+      { name: 'xl/workbook.xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="' + ns + 'spreadsheetml/2006/main" xmlns:r="' + ns +
+        'officeDocument/2006/relationships"><sheets>' + sheets.map(function (sh, i) {
+          return '<sheet name="' + xmlEsc(sh.name) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>';
+        }).join('') + '</sheets></workbook>' },
+      { name: 'xl/_rels/workbook.xml.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="' + ns + 'package/2006/relationships">' +
+        sheets.map(function (_, i) { return '<Relationship Id="rId' + (i + 1) + '" Type="' + ns + 'officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>'; }).join('') +
+        '<Relationship Id="rId' + (sheets.length + 1) + '" Type="' + ns + 'officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+      { name: 'xl/styles.xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="' + ns + 'spreadsheetml/2006/main">' +
+        '<numFmts count="1"><numFmt numFmtId="164" formatCode="d mmm yyyy h:mm AM/PM"/></numFmts>' +
+        '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>' +
+        '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' +
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFE8EFFF"/><bgColor indexed="64"/></patternFill></fill></fills>' +
+        '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+        '<cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+        '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>' +
+        '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>' +
+        '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment vertical="top"/></xf>' +
+        '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>' }
+    ];
+    sheets.forEach(function (sh, i) { files.push({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: sheetXml(sh) }); });
+    return makeZip(files);
+  }
+  // Fault report as a workbook: Faults (one row per fault), Stations, Fault times.
+  function faultWorkbook(list, periodText) {
+    var faults = [], stations = [], times = [];
+    list.forEach(function (x) {
+      var fc = faultyComps(x.a);
+      stations.push([x.st.label, x.st.siteId, fc.length, fc.map(function (c) { return c.name; }).join(', ') || 'None', x.a.from, x.a.to, OVERALL[x.a.overall].label]);
+      fc.forEach(function (c) {
+        var F = faultFacts(x.a, c), i = x.a.components.indexOf(c);
+        faults.push([x.st.label, x.st.siteId, c.name, periodText, F.what.join('\n'), F.when.join('\n'), F.evidence, F.causes.join('\n'), F.effect,
+          F.actions.map(function (t, k) { return (k + 1) + '. ' + t; }).join('\n'), F.verify.join('\n'), '', '', '']);
+        var marks = (c.marks || []).filter(function (m) { return m.result === 'fault'; });
+        marks.filter(function (m) { return m.to != null; }).forEach(function (m) {
+          times.push([x.st.label, x.st.siteId, c.name, m.label, m.from, m.to, round((m.to - m.from) / HOUR, 1), '']);
+        });
+        var byLabel = {};
+        marks.filter(function (m) { return m.to == null; }).forEach(function (m) { (byLabel[m.label] = byLabel[m.label] || []).push(m.from); });
+        Object.keys(byLabel).forEach(function (k) {
+          var ts = byLabel[k].sort(function (p, q) { return p - q; });
+          times.push([x.st.label, x.st.siteId, c.name, k, ts[0], ts[ts.length - 1], round((ts[ts.length - 1] - ts[0]) / HOUR, 1), ts.length]);
+        });
+        if (x.a.daily) x.a.daily.forEach(function (d) {
+          if (d.a.components[i].result === 'fault') times.push([x.st.label, x.st.siteId, c.name, 'Fault day: ' + mainFinding(d.a.components[i]), d.from, d.to, round((d.to - d.from) / HOUR, 1), '']);
+        });
+        if (!marks.length && !x.a.daily) times.push([x.st.label, x.st.siteId, c.name, mainFinding(c), x.a.from, x.a.to, round((x.a.to - x.a.from) / HOUR, 1), '']);
+      });
+    });
+    if (!faults.length) faults.push(['No faults found in ' + periodText + '.']);
+    return makeXlsx([
+      { name: 'Faults', cols: [{ label: 'Station', w: 24 }, { label: 'Station ID', w: 10 }, { label: 'Instrument', w: 18 }, { label: 'Period', w: 14 },
+        { label: 'What was found', w: 48 }, { label: 'When', w: 44 }, { label: 'Evidence', w: 40 }, { label: 'Likely causes', w: 44 }, { label: 'Effect on the data', w: 40 },
+        { label: 'Recommended action', w: 52 }, { label: 'Check after repair', w: 40 }, { label: 'Action taken', w: 28 }, { label: 'Date fixed', w: 14 }, { label: 'Technician', w: 18 }],
+        rows: faults },
+      { name: 'Stations', cols: [{ label: 'Station', w: 26 }, { label: 'Station ID', w: 10 }, { label: 'Faults', w: 8 }, { label: 'Faulty instruments', w: 40 },
+        { label: 'Checked from', w: 22, date: true }, { label: 'Checked to', w: 22, date: true }, { label: 'Overall', w: 18 }], rows: stations },
+      { name: 'Fault times', cols: [{ label: 'Station', w: 26 }, { label: 'Station ID', w: 10 }, { label: 'Instrument', w: 18 }, { label: 'What', w: 44 },
+        { label: 'From', w: 22, date: true }, { label: 'To', w: 22, date: true }, { label: 'Hours', w: 8 }, { label: 'Readings', w: 10 }], rows: times }
+    ]);
+  }
+
+  // The Fault report controls (period list, month when needed, PDF/JPEG/Excel).
+  function faultBar(group, count) {
+    var code = state.maint.fperiod || '24h', thisMonth = dateOf(Date.now()).slice(0, 7);
+    return '<div class="month-bar fault-bar no-print"><span class="dl-l">' + icon('alert') + '<span><b>Fault report</b>' +
+      (group ? ' · ' + count + ' station' + (count === 1 ? '' : 's') : '') + '</span></span>' +
+      '<select id="wn-fperiod" aria-label="Fault report period">' + FAULT_PERIODS.map(function (x) {
+        return '<option value="' + x[0] + '"' + (x[0] === code ? ' selected' : '') + '>' + x[1] + '</option>';
+      }).join('') + '</select>' +
+      (code === 'month' ? '<input type="month" id="wn-fmonth" value="' + (state.maint.fmonth || thisMonth) + '" max="' + thisMonth + '" aria-label="Month">' : '') +
+      '<button class="btn sm" data-act="' + (group ? 'gfault' : 'fault') + '-pdf"' + (count ? '' : ' disabled') + '>' + icon('download') + 'PDF</button>' +
+      '<button class="btn sm" data-act="' + (group ? 'gfault' : 'fault') + '-jpeg"' + (count ? '' : ' disabled') + '>' + icon('download') + 'JPEG</button>' +
+      '<button class="btn sm" data-act="' + (group ? 'gfault' : 'fault') + '-xlsx"' + (count ? '' : ' disabled') + '>' + icon('download') + 'Excel</button>' +
+      '<span class="dl-n">Faults only, with causes, effect on the data, actions and repair checks. Excel lists one fault per row.</span></div>';
   }
 
   var ROUTINE = [
@@ -3176,6 +3535,7 @@
     var fitting = state.view === 'weather' && state.fit && shownIds().length > 0;
     main.classList.toggle('fit-mode', fitting);
     var fitBtn = document.getElementById('wn-fit');
+    fitBtn.hidden = state.view !== 'weather';   // only changes the Weather tab's layout
     fitBtn.innerHTML = state.fit ? icon('list') + 'Details' : icon('grid') + 'Fit screen';
     fitBtn.title = state.fit ? 'Show full details for each station' : 'Show all selected stations on one screen';
     document.documentElement.style.setProperty('--top-h', document.querySelector('.top').offsetHeight + 'px');
@@ -3370,7 +3730,7 @@
     '@container (max-width:190px){.fm .lvl{display:none}.fm{grid-template-columns:1.8em minmax(0,1fr)}}',
     // Groups and scope
     '.gsel{font:inherit;font-weight:700;padding:7px 10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);max-width:200px}',
-    '.gsel[hidden]{display:none}',
+    '.gsel[hidden],.btn[hidden]{display:none}',
     '.groups{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:12px 0 4px;background:var(--panel)}',
     '.groups-h{display:flex;justify-content:space-between;gap:8px;font-size:14px}',
     '.gchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}',
@@ -3424,6 +3784,7 @@
     '.dl-bar{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 14px;margin-bottom:12px}',
     '.dl-l{display:flex;align-items:center;gap:8px}.dl-l .ic{color:var(--brand)}.dl-b{display:flex;gap:8px}.dl-n{color:var(--muted);font-size:12.5px;margin-left:auto}',
     '.month-bar{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 14px;margin:-4px 0 12px}',
+    '.fault-bar .dl-l .ic{color:' + C.red + '}.month-bar select{font:inherit;font-weight:600;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text)}',
     '.month-bar input{font:inherit;font-weight:600;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text)}',
     '.zoomable{cursor:zoom-in;border-radius:8px}.zoomable:hover{background:var(--panel)}',
     '.mtools{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}',
@@ -3520,11 +3881,16 @@
       else if (act === 'net-pdf' || act === 'net-jpeg') exportNetwork(act === 'net-pdf' ? 'pdf' : 'jpeg', el);
       else if (act === 'zoom-close') closeZoom();
       else if (act === 'zoom-latest' && state.zoom) zoomLatest();
+      else if (/^g?fault-(pdf|jpeg|xlsx)$/.test(act)) {
+        var fkind = act.split('-')[1];
+        if (act.charAt(0) === 'g') exportFaults(maintRows().rows.map(function (x) { return x.st; }), fkind, el, true);
+        else exportFaults([stationById(state.maint.open)].filter(Boolean), fkind, el, false);
+      }
       else if (act === 'gmonth-pdf' || act === 'gmonth-jpeg') exportGroupMonthly(act === 'gmonth-pdf' ? 'pdf' : 'jpeg', el);
       else if (act === 'month-pdf' || act === 'month-jpeg') exportMonthly(state.maint.open, act === 'month-pdf' ? 'pdf' : 'jpeg', el);
       else if ((act === 'zoom-pdf' || act === 'zoom-jpeg') && state.zoom) exportInstrument(state.zoom.id, state.zoom.key, act === 'zoom-pdf' ? 'pdf' : 'jpeg', el);
       else if (act === 'maint-print') window.print();
-      else if (act === 'fit') { state.fit = !state.fit; state.view = 'weather'; save(); render(); window.scrollTo(0, 0); }
+      else if (act === 'fit') { if (state.view !== 'weather') return; state.fit = !state.fit; save(); render(); window.scrollTo(0, 0); }
       return;
     }
     if ((el = t.closest('[data-zoom]'))) { openZoom(state.maint.open, el.getAttribute('data-zoom')); return; }
@@ -3584,6 +3950,8 @@
 
   document.body.addEventListener('change', function (e) {
     if (e.target.id === 'wn-month') { state.maint.month = e.target.value; return; }
+    if (e.target.id === 'wn-fperiod') { state.maint.fperiod = e.target.value; render(); return; }
+    if (e.target.id === 'wn-fmonth') { state.maint.fmonth = e.target.value; return; }
     if (state.zoom && (e.target.id === 'wn-zdate' || e.target.id === 'wn-zdays')) {
       var zdate = document.getElementById('wn-zdate').value, zv = document.getElementById('wn-zdays').value, zdays = zv === 'month' ? 'month' : +zv;
       if (zdate) loadZoomPeriod(zdate, zdays);
