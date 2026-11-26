@@ -1950,7 +1950,8 @@
       var per = [], bucket = a.daily ? 24 * HOUR : HOUR, want = Math.round(bucket / TEN_MIN);
       for (var t = a.from; t < a.to; t += bucket) {
         var n = 0, seen = {};
-        rows.forEach(function (r) { if (r.t > t && r.t <= t + bucket && !seen[r.t]) { seen[r.t] = 1; n++; } });
+        var after = t === a.from ? t - TEN_MIN - 1 : t;   // first bucket: same window as the check (a record just before the start counts)
+        rows.forEach(function (r) { if (r.t > after && r.t <= t + bucket && !seen[r.t]) { seen[r.t] = 1; n++; } });
         per.push({ t: t + bucket, v: n });
       }
       spec.panels.push({ label: 'Records received per ' + (a.daily ? 'day' : 'hour'), unit: 'records', fixed: [0, Math.ceil(want * 1.15)],
@@ -2061,7 +2062,9 @@
 
   // Summary numbers for the main reading within a time range.
   function statsIn(spec, t0, t1) {
-    var pts = (spec.mainSeries || []).filter(function (p) { return p.t >= t0 && p.t <= t1; });
+    var pts = (spec.mainSeries || []).filter(function (p) {   // record counts: include the last, unfinished hour or day
+      return spec.key === 'comms' ? p.t > t0 && p.t - spec.bucket < t1 : p.t >= t0 && p.t <= t1;
+    });
     var vals = pts.map(function (p) { return p.v; });
     var flagged = spec.marks.filter(function (m) { return (m.to == null ? m.from : m.to) >= t0 && m.from <= t1; }).length;
     var expected = Math.max(1, Math.round((t1 - t0) / TEN_MIN));
@@ -2170,7 +2173,7 @@
         ctx.strokeStyle = l.color; ctx.setLineDash([6, 4]); ctx.lineWidth = 1.2;
         ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w - R, y); ctx.stroke(); ctx.setLineDash([]);
         ctx.fillStyle = l.color; ctx.textAlign = 'right'; ctx.font = '700 10.5px ' + FONT_STACK;
-        ctx.fillText(l.label, w - R - 4, y - 8); ctx.font = '600 11px ' + FONT_STACK;
+        ctx.fillText(l.label, w - R - 4, y - y0 < 12 ? y + 9 : y - 8); ctx.font = '600 11px ' + FONT_STACK;   // below the line when it is at the top
       });
       var visCount = 0;
       p.series[0].pts.forEach(function (q) { if (q.t >= t0 && q.t <= t1) visCount++; });
@@ -2626,7 +2629,7 @@
         if (cell && typeof cell === 'object') return cell;
         return { lines: wrap(cell == null ? '' : cell, cols[i].w * W - 12, dfont(size, cols[i].bold ? 700 : 400)) };
       });
-      var n = Math.max.apply(null, cells.map(function (c) { return c.lines ? c.lines.length : 1; }));
+      var n = Math.max.apply(null, cells.map(function (c) { return c.lines ? c.lines.length : c.spark ? 3 : 1; }));
       var h = n * lh + 10;
       self.add({ h: h, repeatHead: head, draw: function (ctx, x, y) {
         if (tint) { ctx.fillStyle = tint; ctx.fillRect(x, y, W, h); }
@@ -2635,6 +2638,7 @@
         cells.forEach(function (c, i) {
           var cx = x + xs[i] + 6;
           if (c.pill) pill(ctx, cx, y + 5, RESULT[c.pill] ? RESULT[c.pill].label : OVERALL[c.pill].label, c.pill, 10);
+          else if (c.spark) drawSpark(ctx, cx, y + 5, cols[i].w * W - 12, h - 10, c.spark);
           else if (c.dot) { ctx.fillStyle = RES_COLOR[c.dot]; ctx.beginPath(); ctx.arc(x + xs[i] + cols[i].w * W / 2, y + 5 + lh / 2, 5, 0, 7); ctx.fill(); }
           else {
             ctx.fillStyle = c.color || (cols[i].muted ? PAPER.muted : PAPER.text);
@@ -2721,6 +2725,7 @@
   };
   // One long image (no page breaks). Too tall for one image → one image per page.
   Doc.prototype.longCanvases = function () {
+    if (this.a4Images) return this.pageCanvases();
     var blocks = this.cutAt != null ? this.blocks.slice(0, this.cutAt) : this.blocks;
     var total = DOC.M + blocks.reduce(function (s, b) { return s + b.h; }, 0) + 16 + noteHeight() + 40 + DOC.M / 2;
     if (total * DOC.S > 30000) return this.pageCanvases();
@@ -2779,16 +2784,17 @@
       verify: ['Readings are near 0 at night and form a smooth curve by day', 'Midday values are reasonable for the sky conditions'] }
   };
   // When the fault was seen: flagged periods, flagged readings, or (monthly) the days it was found.
-  function faultWhen(a, c, i) {
+  function faultWhen(a, c, i, level) {
     var out = [];
+    level = level || 'fault';
     if (a.daily) {
-      var days = a.daily.filter(function (d) { return d.a.components[i].result === 'fault'; });
+      var days = a.daily.filter(function (d) { return d.a.components[i].result === level; });
       if (days.length) {
-        out.push('Fault found on ' + days.length + ' of ' + a.daily.length + ' days: ' + days.map(function (d) { return phtDate(d.from).getUTCDate(); }).join(', ') + ' ' +
+        out.push((level === 'fault' ? 'Fault found on ' : 'Check needed on ') + days.length + ' of ' + a.daily.length + ' days: ' + days.map(function (d) { return phtDate(d.from).getUTCDate(); }).join(', ') + ' ' +
           MONTH_SHORT[phtDate(days[0].from).getUTCMonth()] + '.');
       }
     }
-    var marks = (c.marks || []).filter(function (m) { return m.result === 'fault'; });
+    var marks = (c.marks || []).filter(function (m) { return m.result === level; });
     marks.filter(function (m) { return m.to != null; }).forEach(function (m) { out.push(m.label + ': ' + rangeLabel(m.from, m.to) + ' (' + hrs(m.to - m.from) + ').'); });
     var byLabel = {};
     marks.filter(function (m) { return m.to == null; }).forEach(function (m) { (byLabel[m.label] = byLabel[m.label] || []).push(m.from); });
@@ -2800,14 +2806,15 @@
     return out;
   }
   // Everything known about one faulty instrument (shared by the PDF/JPEG write-up and the Excel workbook).
-  function faultFacts(a, c) {
+  function faultFacts(a, c, level) {
+    level = level || 'fault';
     var i = a.components.indexOf(c), info = FAULT_INFO[c.key];
-    var what = c.findings.filter(function (f) { return f.result === 'fault'; }).map(function (f) { return f.text; });
+    var what = c.findings.filter(function (f) { return f.result === level; }).map(function (f) { return f.text; });
     if (a.daily) {
       a.daily.forEach(function (d) {
         d.a.components[i].findings.forEach(function (f) {
           var t = dayLabel(d.from) + ': ' + f.text;
-          if (f.result === 'fault' && what.length < 4 && what.indexOf(t) === -1 && what.indexOf(f.text) === -1) what.push(t);
+          if (f.result === level && what.length < 4 && what.indexOf(t) === -1 && what.indexOf(f.text) === -1) what.push(t);
         });
       });
     }
@@ -2815,28 +2822,37 @@
     var acts = c.actions.slice();
     if (a.daily) a.daily.forEach(function (d) { d.a.components[i].actions.forEach(function (x) { if (acts.indexOf(x) === -1) acts.push(x); }); });
     return {
-      what: what, when: faultWhen(a, c, i),
+      what: what, when: faultWhen(a, c, i, level), level: level,
       evidence: a.rows.length && c.key !== 'clock' ? statsIn(instrumentSpec(a, c.key), a.from, a.to).map(function (x) { return x[0] + ' ' + x[1]; }).join('  ·  ') : '',
-      causes: info.causes, effect: info.effect, actions: acts, verify: info.verify
+      causes: info.causes, actions: acts, verify: info.verify,
+      effect: level === 'fault' ? info.effect : 'If confirmed on site: ' + info.effect.charAt(0).toLowerCase() + info.effect.slice(1)
     };
   }
-  // A full write-up for one faulty instrument. signoff adds lines to record the repair (PDF).
-  function addFaultDetail(doc, a, c, signoff) {
-    var F = faultFacts(a, c);
+  // A full write-up for one faulty instrument (signoff is no longer used: the user asked for no sign-off lines).
+  // chart adds the instrument's graph for the period, with the fault times shaded.
+  // level: 'fault' (default) or 'check' for an instrument that needs checking.
+  function addFaultDetail(doc, a, c, signoff, chart, level) {
+    level = level || 'fault';
+    var F = faultFacts(a, c, level), first = doc.blocks.length;
     doc.space(6).add({ h: 32, keepNext: true, draw: function (ctx, x, y) {
       var W = DOC.W - 2 * DOC.M;
-      ctx.fillStyle = PILL.fault[1]; roundRect(ctx, x, y + 2, W, 28, 8); ctx.fill();
-      ctx.fillStyle = PILL.fault[0]; ctx.font = dfont(14, 800); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-      ctx.fillText('Fault — ' + c.name, x + 12, y + 16);
+      ctx.fillStyle = PILL[level][1]; roundRect(ctx, x, y + 2, W, 28, 8); ctx.fill();
+      ctx.fillStyle = PILL[level][0]; ctx.font = dfont(14, 800); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      ctx.fillText((level === 'fault' ? 'Fault — ' : 'Check — ') + c.name, x + 12, y + 16);
     } });
     function head(t) { doc.text(t, { weight: 800, size: 12, keepNext: true, after: 1 }); }
+    if (chart && a.rows.length) {
+      var spec = instrumentSpec(a, c.key);
+      doc.chart(spec, { t0: a.from, t1: a.to }, spec.panels.length > 1 ? 250 : 190);
+    }
     head('What was found');
-    F.what.forEach(function (t) { doc.text(t, { indent: 18, bullet: RES_COLOR.fault, size: 12 }); });
+    F.what.forEach(function (t) { doc.text(t, { indent: 18, bullet: RES_COLOR[level], size: 12 }); });
     head('When');
     F.when.forEach(function (t) { doc.text(t, { indent: 18, bullet: PAPER.muted, size: 12 }); });
     if (F.evidence) { head('Evidence (' + (a.daily ? 'whole period, day by day' : 'checked period') + ')'); doc.text(F.evidence, { indent: 18, size: 12 }); }
-    head('Likely causes');
+    head(level === 'fault' ? 'Likely causes' : 'Possible causes');
     F.causes.forEach(function (t) { doc.text(t, { indent: 18, bullet: '#f07f1f', size: 12 }); });
+    if (level === 'check') doc.text('Unusual weather can also cause this; confirm on site before replacing equipment.', { indent: 18, bullet: PAPER.muted, size: 12 });
     head('Effect on the data');
     doc.text(F.effect, { indent: 18, size: 12 });
     if (F.actions.length) {
@@ -2845,10 +2861,9 @@
     }
     head('Check after repair');
     F.verify.forEach(function (t) { doc.text(t, { indent: 22, box: true, size: 12 }); });
-    if (signoff) {
-      doc.text('Action taken: ____________________________________________________________', { size: 11.5, color: PAPER.muted, before: 0 });
-      doc.text('Date fixed: ________________     Technician: ______________________     Signature: ______________', { size: 11.5, color: PAPER.muted, after: 8 });
-    }
+    doc.space(8);
+    // Keep the whole write-up on one page when it fits (it moves to the next page instead of splitting).
+    for (var k = first; k < doc.blocks.length; k++) doc.blocks[k].keepNext = k < doc.blocks.length - 1;
   }
   // All faulty instruments of a station (or month), under one heading.
   function addFaultDetails(doc, a, signoff) {
@@ -2902,7 +2917,6 @@
     ROUTINE.forEach(function (x) { doc.text(x, { indent: 22, box: true }); });
     doc.space(8).text('Assessment uses the station’s uploaded 10-minute data and WMO-style quality-control tests. ' +
       'Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment.', { size: 10.5, color: PAPER.muted });
-    doc.text('Checked by: ______________________     Date of visit: ______________     Signature: ______________', { size: 11.5, color: PAPER.muted, before: 0 });
     return doc;
   }
 
@@ -3133,46 +3147,158 @@
       return a;
     });
   }
-  function faultyComps(a) {
-    return a.components.filter(function (c, i) {
-      return c.result === 'fault' || (a.daily && a.daily.some(function (d) { return d.a.components[i].result === 'fault'; }));
-    });
+  // Instrument level for the report: 'fault', 'check' (only when withCheck) or null.
+  function compLevel(a, c, withCheck) {
+    var i = a.components.indexOf(c);
+    function any(r) { return c.result === r || (a.daily && a.daily.some(function (d) { return d.a.components[i].result === r; })); }
+    return any('fault') ? 'fault' : withCheck && any('check') ? 'check' : null;
   }
-  function faultDoc(list, title, sub, periodText, single) {
-    var withFaults = list.filter(function (x) { return faultyComps(x.a).length; });
-    var nFaults = withFaults.reduce(function (n, x) { return n + faultyComps(x.a).length; }, 0);
-    var doc = new Doc(title + ' — fault report, ' + periodText);
-    var r0 = list[0] && list[0].a;
-    doc.header('Fault report', title, sub, nFaults ? 'fault' : 'ok', nFaults ? nFaults + ' fault' + (nFaults > 1 ? 's' : '') : 'No faults',
-      ['Period: ' + periodText, r0 ? rangeLabel(r0.from, r0.to) : '', 'Report made ' + stamp(Date.now())]);
-    if (!single) {
-      doc.stats([['Stations checked', String(list.length)], ['With faults', String(withFaults.length)], ['Faulty instruments', String(nFaults)],
-        ['No faults', String(list.length - withFaults.length)]]);
+  // Instruments for the report, faults first. withCheck adds instruments that need checking.
+  function faultyComps(a, withCheck) {
+    var list = a.components.filter(function (c) { return compLevel(a, c, withCheck); });
+    return list.filter(function (c) { return compLevel(a, c, withCheck) === 'fault'; })
+      .concat(list.filter(function (c) { return compLevel(a, c, withCheck) === 'check'; }));
+  }
+  // A small graph inside a table cell: the instrument's main reading, with problem times shaded.
+  function drawSpark(ctx, x, y, w, h, o) {
+    var a = o.a, spec = instrumentSpec(a, o.key), s0 = spec.panels[0].series[0];
+    var pts = s0.pts.filter(function (p) { return p.t >= a.from && p.t <= a.to + (s0.barMs || 0); });
+    var t0 = a.from, t1 = a.to;
+    function X(t) { return x + w * (t - t0) / Math.max(1, t1 - t0); }
+    ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+    ctx.fillStyle = PAPER.panel; ctx.fillRect(x, y, w, h);
+    function band(f, t, col) { var p = Math.max(x, X(f)), q = Math.min(x + w, X(t)); if (q > p) { ctx.fillStyle = col; ctx.fillRect(p, y, Math.max(1, q - p), h); } }
+    spec.gaps.forEach(function (g) { band(g.from, g.to, 'rgba(138,150,168,.28)'); });
+    spec.marks.forEach(function (m) { if (m.to != null) band(m.from, m.to, m.result === 'fault' ? 'rgba(229,72,77,.22)' : 'rgba(240,180,41,.3)'); });
+    if (pts.length < 2) {
+      ctx.fillStyle = PAPER.muted; ctx.font = dfont(9, 700); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('No data', x + w / 2, y + h / 2); ctx.restore(); return;
     }
-    if (!nFaults) {
-      doc.callout('No faults were found ' + (single ? 'at this station' : 'at these stations') + ' in this period. Items needing a check (not faults) are left out of this report.', 'ok');
+    var vals = pts.map(function (p) { return p.v; }), lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    if (s0.type === 'bar') lo = Math.min(0, lo);
+    if (hi - lo < 1e-6) { lo -= 1; hi += 1; }
+    function Y(v) { return y + h - 3 - (h - 6) * (v - lo) / (hi - lo); }
+    ctx.fillStyle = ctx.strokeStyle = s0.color;
+    if (s0.type === 'bar') {
+      pts.forEach(function (p) { var xa = X(p.t - s0.barMs), xb = X(p.t); if (p.v > 0) ctx.fillRect(xa, Y(p.v), Math.max(1, xb - xa - 0.5), Y(lo) - Y(p.v)); });
+    } else if (s0.type === 'dot') {
+      pts.forEach(function (p) { ctx.fillRect(X(p.t) - 0.75, Y(p.v) - 0.75, 1.5, 1.5); });
+    } else {
+      ctx.lineWidth = 1.3; ctx.beginPath();
+      pts.forEach(function (p, i) { if (!i || p.t - pts[i - 1].t > 2 * TEN_MIN) ctx.moveTo(X(p.t), Y(p.v)); else ctx.lineTo(X(p.t), Y(p.v)); });
+      ctx.stroke();
+    }
+    spec.marks.forEach(function (m) {
+      if (m.to != null) return;
+      var q = null; pts.forEach(function (p) { if (Math.abs(p.t - m.from) < 30000) q = p; });
+      if (q) { ctx.fillStyle = RES_COLOR[m.result]; ctx.beginPath(); ctx.arc(X(q.t), Y(q.v), 1.8, 0, 7); ctx.fill(); }
+    });
+    ctx.restore();
+  }
+  // A compact write-up for one problem: heading, graph, then two columns of text.
+  function addFaultCard(doc, a, c, level, who) {
+    var F = faultFacts(a, c, level), W = DOC.W - 2 * DOC.M, first = doc.blocks.length;
+    doc.space(4).add({ h: 28, keepNext: true, draw: function (ctx, x, y) {
+      ctx.fillStyle = PILL[level][1]; roundRect(ctx, x, y + 2, W, 24, 7); ctx.fill();
+      ctx.fillStyle = PILL[level][0]; ctx.font = dfont(13, 800); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      ctx.fillText((level === 'fault' ? 'Fault — ' : 'Check — ') + (who ? who + ' · ' : '') + c.name, x + 10, y + 14);
+    } });
+    if (a.rows.length) { var spec = instrumentSpec(a, c.key); doc.chart(spec, { t0: a.from, t1: a.to }, spec.panels.length > 1 ? 190 : 140); }
+    var gap = 20, cw = (W - gap) / 2, lh = 14, f = dfont(10.5, 400), fb = dfont(10.5, 800);
+    function column(sections) {
+      var out = [];
+      sections.forEach(function (sec) {
+        if (!sec.items.length) return;
+        out.push({ t: sec.title, bold: true });
+        sec.items.forEach(function (it) { wrap(it, cw - 14, f).forEach(function (ln, k) { out.push({ t: ln, dot: k === 0 ? sec.dot : null }); }); });
+      });
+      return out;
+    }
+    var left = column([{ title: 'What was found', items: F.what, dot: RES_COLOR[level] }, { title: 'When', items: F.when, dot: PAPER.muted },
+      { title: 'Evidence', items: F.evidence ? [F.evidence] : [] }, { title: 'Effect on the data', items: [F.effect] }]);
+    var right = column([{ title: level === 'fault' ? 'Likely causes' : 'Possible causes (or unusual weather)', items: [F.causes.join('; ') + '.'] },
+      { title: 'Recommended action', items: F.actions.map(function (t, k) { return (k + 1) + '. ' + t; }) },
+      { title: 'Check after repair', items: [F.verify.join('; ') + '.'] }]);
+    doc.add({ h: Math.max(left.length, right.length) * lh + 8, draw: function (ctx, x, y) {
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      [[left, x], [right, x + cw + gap]].forEach(function (pair) {
+        pair[0].forEach(function (ln, i) {
+          var yy = y + i * lh + lh / 2;
+          ctx.font = ln.bold ? fb : f; ctx.fillStyle = PAPER.text;
+          ctx.fillText(ln.t, pair[1] + (ln.bold ? 0 : 14), yy);
+          if (ln.dot) { ctx.fillStyle = ln.dot; ctx.beginPath(); ctx.arc(pair[1] + 6, yy, 3, 0, 7); ctx.fill(); }
+        });
+      });
+    } });
+    for (var k = first; k < doc.blocks.length; k++) doc.blocks[k].keepNext = k < doc.blocks.length - 1;
+  }
+  // single: one station, faults only. Otherwise a group: faults and instruments that need checking.
+  // Aims for one A4 page: compact cards with graphs when they fit, otherwise one table row per problem with a small graph.
+  function faultDoc(list, title, sub, periodText, single) {
+    var withCheck = !single, items = [];
+    list.forEach(function (x) { faultyComps(x.a, withCheck).forEach(function (c) { items.push({ x: x, c: c, lv: compLevel(x.a, c, withCheck) }); }); });
+    var nFaults = items.filter(function (it) { return it.lv === 'fault'; }).length, nChecks = items.length - nFaults;
+    var clean = list.filter(function (x) { return !faultyComps(x.a, withCheck).length; });
+    var r0 = list[0] && list[0].a;
+    function start() {
+      var doc = new Doc(title + (single ? ' — fault report, ' : ' — fault and check report, ') + periodText);
+      doc.a4Images = true;   // JPEG as A4 pages, ready to print on bond paper
+      var pillText = nFaults ? nFaults + ' fault' + (nFaults > 1 ? 's' : '') + (nChecks ? ' · ' + nChecks + ' to check' : '')
+        : nChecks ? nChecks + ' to check' : single ? 'No faults' : 'No problems';
+      doc.header(single ? 'Fault report' : 'Fault and check report', title, sub, nFaults ? 'fault' : nChecks ? 'check' : 'ok', pillText,
+        ['Period: ' + periodText, r0 ? rangeLabel(r0.from, r0.to) : '', 'Report made ' + stamp(Date.now())]);
+      if (!single) {
+        var st = { maintenance: 0, attention: 0, offline: 0 };
+        list.forEach(function (x) { if (st[x.a.overall] != null) st[x.a.overall]++; });
+        doc.stats([['Stations', String(list.length)], ['Maintenance', String(st.maintenance)], ['Attention', String(st.attention)],
+          ['Offline', String(st.offline)], ['Faults', String(nFaults)], ['To check', String(nChecks)]]);
+      }
       return doc;
     }
-    if (single) {
-      faultyComps(list[0].a).forEach(function (c) { addFaultDetail(doc, list[0].a, c, true); });
-    } else {
-      doc.text('Stations with faults', { weight: 800, size: 15, keepNext: true, after: 6 });
-      doc.table([{ label: 'Station', w: 0.26, bold: true }, { label: 'ID', w: 0.07, muted: true }, { label: 'Faulty instruments', w: 0.27 }, { label: 'Main fault', w: 0.4 }],
-        withFaults.map(function (x) {
-          var fc = faultyComps(x.a);
-          return [x.st.label, x.st.siteId, fc.map(function (c) { return c.name; }).join(', '), mainFinding(fc[0])];
-        }), { size: 11 });
-      withFaults.forEach(function (x) {
-        doc.space(10).add({ h: 34, keepNext: true, draw: function (ctx, px, py) {
-          ctx.fillStyle = PAPER.text; ctx.font = dfont(17, 800); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-          ctx.fillText(x.st.label + '  ·  Station ' + x.st.siteId, px, py + 16);
-        } });
-        faultyComps(x.a).forEach(function (c) { addFaultDetail(doc, x.a, c, true); });
-      });
-      var clean = list.filter(function (x) { return !faultyComps(x.a).length; });
-      if (clean.length) doc.space(6).text('No faults: ' + clean.map(function (x) { return x.st.label; }).join(', ') + '.', { size: 11.5, color: PAPER.muted });
+    function finish(doc) {
+      if (!single && clean.length) doc.space(4).text('All clear: ' + clean.map(function (x) { return x.st.label; }).join(', ') + '.', { size: 10.5, color: PAPER.muted, after: 2 });
+      doc.space(4).text(single ? 'Faults only. Items rated Check are left out; see the station maintenance report for those.'
+        : 'Faults and instruments that need checking. Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment.',
+        { size: 9.5, color: PAPER.muted });
+      return doc;
     }
-    doc.space(6).text('This report lists faults only. Items rated Check are left out; see the station maintenance report for those.', { size: 10.5, color: PAPER.muted });
+    var doc = start();
+    if (!items.length) {
+      doc.callout(single ? 'No faults were found at this station in this period. Items needing a check (not faults) are left out of this report.'
+        : 'No faults and no instruments needing a check were found at these stations in this period.', 'ok');
+      return finish(doc);
+    }
+    // 1. Cards with graphs, if everything fits on one page.
+    items.forEach(function (it) { addFaultCard(doc, it.x.a, it.c, it.lv, single ? '' : it.x.st.label); });
+    finish(doc);
+    if (doc.paginate().length === 1) return doc;
+    // 2. Otherwise one row per problem (with status and a small graph). Tighter versions are tried until it fits one page.
+    var tries = [{ size: 9.5, acts: 2, max: 6 }, { size: 9, acts: 1, max: 3 }, { size: 8.5, acts: 1, max: 2 }];
+    for (var ti = 0; ti < tries.length; ti++) {
+      var o = tries[ti];
+      doc = start();
+      var cols = (single ? [] : [{ label: 'Station', w: 0.15, bold: true }]).concat([{ label: 'Instrument', w: 0.13, bold: true }, { label: 'Result', w: 0.085 },
+        { label: 'Graph', w: 0.17 }, { label: 'What was found · when', w: single ? 0.33 : 0.255 }, { label: 'Recommended action', w: single ? 0.285 : 0.21 }]);
+      var Wt = DOC.W - 2 * DOC.M;
+      var cell = function (text, colIndex, bold, max) {   // wrapped and cut to max lines
+        max = max || o.max;
+        var lines = wrap(text, cols[colIndex].w * Wt - 12, dfont(o.size, bold ? 700 : 400));
+        if (lines.length > max) { lines = lines.slice(0, max); lines[max - 1] = lines[max - 1].replace(/\s*\S*$/, '') + '…'; }
+        return { lines: lines };
+      };
+      var off = single ? 0 : 1;
+      doc.table(cols, items.map(function (it) {
+        var F = faultFacts(it.x.a, it.c, it.lv);
+        var acts = F.actions.slice(0, o.acts).map(function (t, k) { return (o.acts > 1 && F.actions.length > 1 ? (k + 1) + '. ' : '') + t; }).join('\n');
+        return { cells: (single ? [] : [cell(it.x.st.label + '\n' + it.x.st.siteId + ' · ' + OVERALL[it.x.a.overall].label, 0, true, Math.max(4, o.max))])
+          .concat([cell(it.c.name, off, true), { pill: it.lv }, { spark: { a: it.x.a, key: it.c.key } }, cell(F.what[0] + '\n' + F.when[0], off + 3), cell(acts, off + 4)]),
+          tint: it.lv === 'fault' ? '#fdf1f1' : '#fffaf0' };
+      }), { size: o.size });
+      doc.text('Graph: the main reading over the period; shading marks problem times (red fault, yellow check, grey no data). ' +
+        'Open a station in AutoWx for its full report with causes and repair checks.', { size: 9, color: PAPER.muted, after: 2 });
+      finish(doc);
+      if (doc.paginate().length === 1) break;
+    }
     return doc;
   }
   // stations: list of stations to check; group: true for the Maintenance page (several stations).
@@ -3200,17 +3326,18 @@
       button.disabled = false; button.innerHTML = label;
       if (failed.length) alert('Could not load ' + failed.length + ' station(s): ' + failed.join(', ') + '. The report leaves them out.');
       if (!out.length) return;
-      out.sort(function (x, y) { return faultyComps(y.a).length - faultyComps(x.a).length || x.st.label.localeCompare(y.st.label); });
+      out.sort(function (x, y) {
+        var fx = faultyComps(x.a).length, fy = faultyComps(y.a).length;
+        return fy - fx || faultyComps(y.a, group).length - faultyComps(x.a, group).length || x.st.label.localeCompare(y.st.label);
+      });
       var cur = currentGroup(), desc = cur ? cur.name : state.scope === 'selected' ? 'Selected stations' : 'All stations';
       var periodText = faultPeriodLabel(code, ym);
       var title = group ? desc : out[0].st.label, sub = group ? out.length + ' station' + (out.length === 1 ? '' : 's') : stationSub(out[0].st);
       var tag = code === 'month' ? ym : code === '7d' ? 'last7days' : 'last' + code;
-      var base = 'AutoWx_' + (group ? fileSafe(desc) : fileSafe(out[0].st.siteId) + '_' + fileSafe(out[0].st.label)) + '_faults_' + tag +
+      var base = 'AutoWx_' + (group ? fileSafe(desc) : fileSafe(out[0].st.siteId) + '_' + fileSafe(out[0].st.label)) + (group ? '_faults_checks_' : '_faults_') + tag +
         (code === 'month' ? '' : '_' + fileStamp(Date.now()));
-      if (kind === 'xlsx') { saveFile(faultWorkbook(out, periodText), base + '.xlsx'); return; }
-      return exportDoc(function () { return faultDoc(out, title, sub, periodText, !group); },
-        'AutoWx_' + (group ? fileSafe(desc) : fileSafe(out[0].st.siteId) + '_' + fileSafe(out[0].st.label)) + '_faults_' + tag +
-        (code === 'month' ? '' : '_' + fileStamp(Date.now())), kind, button);
+      if (kind === 'xlsx') { saveFile(faultWorkbook(out, periodText, group), base + '.xlsx'); return; }
+      return exportDoc(function () { return faultDoc(out, title, sub, periodText, !group); }, base, kind, button);
     }).catch(function (err) {
       button.disabled = false; button.innerHTML = label;
       alert(err instanceof SignedOut ? 'You have been signed out of cserv. Sign in again, then reopen AutoWx.' : 'Could not make the report: ' + ((err && err.message) || err));
@@ -3295,48 +3422,53 @@
     return makeZip(files);
   }
   // Fault report as a workbook: Faults (one row per fault), Stations, Fault times.
-  function faultWorkbook(list, periodText) {
+  // withCheck (group report): instruments that need checking are included, with a Result column.
+  function faultWorkbook(list, periodText, withCheck) {
     var faults = [], stations = [], times = [];
     list.forEach(function (x) {
-      var fc = faultyComps(x.a);
-      stations.push([x.st.label, x.st.siteId, fc.length, fc.map(function (c) { return c.name; }).join(', ') || 'None', x.a.from, x.a.to, OVERALL[x.a.overall].label]);
+      var fc = faultyComps(x.a, withCheck);
+      function names(lv) { return fc.filter(function (c) { return compLevel(x.a, c, withCheck) === lv; }).map(function (c) { return c.name; }); }
+      stations.push([x.st.label, x.st.siteId, names('fault').length, names('fault').join(', ') || 'None', names('check').length, names('check').join(', ') || 'None',
+        x.a.from, x.a.to, OVERALL[x.a.overall].label]);
       fc.forEach(function (c) {
-        var F = faultFacts(x.a, c), i = x.a.components.indexOf(c);
-        faults.push([x.st.label, x.st.siteId, c.name, periodText, F.what.join('\n'), F.when.join('\n'), F.evidence, F.causes.join('\n'), F.effect,
-          F.actions.map(function (t, k) { return (k + 1) + '. ' + t; }).join('\n'), F.verify.join('\n'), '', '', '']);
-        var marks = (c.marks || []).filter(function (m) { return m.result === 'fault'; });
+        var lv = compLevel(x.a, c, withCheck), res = RESULT[lv].label, F = faultFacts(x.a, c, lv), i = x.a.components.indexOf(c);
+        faults.push([x.st.label, x.st.siteId, c.name, res, periodText, F.what.join('\n'), F.when.join('\n'), F.evidence, F.causes.join('\n'), F.effect,
+          F.actions.map(function (t, k) { return (k + 1) + '. ' + t; }).join('\n'), F.verify.join('\n')]);
+        var marks = (c.marks || []).filter(function (m) { return m.result === lv; });
         marks.filter(function (m) { return m.to != null; }).forEach(function (m) {
-          times.push([x.st.label, x.st.siteId, c.name, m.label, m.from, m.to, round((m.to - m.from) / HOUR, 1), '']);
+          times.push([x.st.label, x.st.siteId, c.name, res, m.label, m.from, m.to, round((m.to - m.from) / HOUR, 1), '']);
         });
         var byLabel = {};
         marks.filter(function (m) { return m.to == null; }).forEach(function (m) { (byLabel[m.label] = byLabel[m.label] || []).push(m.from); });
         Object.keys(byLabel).forEach(function (k) {
           var ts = byLabel[k].sort(function (p, q) { return p - q; });
-          times.push([x.st.label, x.st.siteId, c.name, k, ts[0], ts[ts.length - 1], round((ts[ts.length - 1] - ts[0]) / HOUR, 1), ts.length]);
+          times.push([x.st.label, x.st.siteId, c.name, res, k, ts[0], ts[ts.length - 1], round((ts[ts.length - 1] - ts[0]) / HOUR, 1), ts.length]);
         });
         if (x.a.daily) x.a.daily.forEach(function (d) {
-          if (d.a.components[i].result === 'fault') times.push([x.st.label, x.st.siteId, c.name, 'Fault day: ' + mainFinding(d.a.components[i]), d.from, d.to, round((d.to - d.from) / HOUR, 1), '']);
+          if (d.a.components[i].result === lv) times.push([x.st.label, x.st.siteId, c.name, res, res + ' day: ' + mainFinding(d.a.components[i]), d.from, d.to, round((d.to - d.from) / HOUR, 1), '']);
         });
-        if (!marks.length && !x.a.daily) times.push([x.st.label, x.st.siteId, c.name, mainFinding(c), x.a.from, x.a.to, round((x.a.to - x.a.from) / HOUR, 1), '']);
+        if (!marks.length && !x.a.daily) times.push([x.st.label, x.st.siteId, c.name, res, mainFinding(c), x.a.from, x.a.to, round((x.a.to - x.a.from) / HOUR, 1), '']);
       });
     });
-    if (!faults.length) faults.push(['No faults found in ' + periodText + '.']);
+    if (!faults.length) faults.push([(withCheck ? 'No faults and no instruments needing a check found in ' : 'No faults found in ') + periodText + '.']);
     return makeXlsx([
-      { name: 'Faults', cols: [{ label: 'Station', w: 24 }, { label: 'Station ID', w: 10 }, { label: 'Instrument', w: 18 }, { label: 'Period', w: 14 },
-        { label: 'What was found', w: 48 }, { label: 'When', w: 44 }, { label: 'Evidence', w: 40 }, { label: 'Likely causes', w: 44 }, { label: 'Effect on the data', w: 40 },
-        { label: 'Recommended action', w: 52 }, { label: 'Check after repair', w: 40 }, { label: 'Action taken', w: 28 }, { label: 'Date fixed', w: 14 }, { label: 'Technician', w: 18 }],
-        rows: faults },
-      { name: 'Stations', cols: [{ label: 'Station', w: 26 }, { label: 'Station ID', w: 10 }, { label: 'Faults', w: 8 }, { label: 'Faulty instruments', w: 40 },
-        { label: 'Checked from', w: 22, date: true }, { label: 'Checked to', w: 22, date: true }, { label: 'Overall', w: 18 }], rows: stations },
-      { name: 'Fault times', cols: [{ label: 'Station', w: 26 }, { label: 'Station ID', w: 10 }, { label: 'Instrument', w: 18 }, { label: 'What', w: 44 },
-        { label: 'From', w: 22, date: true }, { label: 'To', w: 22, date: true }, { label: 'Hours', w: 8 }, { label: 'Readings', w: 10 }], rows: times }
+      { name: withCheck ? 'Faults and checks' : 'Faults', cols: [{ label: 'Station', w: 24 }, { label: 'Station ID', w: 10 }, { label: 'Instrument', w: 18 },
+        { label: 'Result', w: 9 }, { label: 'Period', w: 14 }, { label: 'What was found', w: 48 }, { label: 'When', w: 44 }, { label: 'Evidence', w: 40 },
+        { label: withCheck ? 'Likely or possible causes' : 'Likely causes', w: 44 }, { label: 'Effect on the data', w: 40 }, { label: 'Recommended action', w: 52 },
+        { label: 'Check after repair', w: 40 }], rows: faults },
+      { name: 'Stations', cols: [{ label: 'Station', w: 26 }, { label: 'Station ID', w: 10 }, { label: 'Faults', w: 8 }, { label: 'Faulty instruments', w: 36 },
+        { label: 'To check', w: 9 }, { label: 'Instruments to check', w: 36 }, { label: 'Checked from', w: 22, date: true }, { label: 'Checked to', w: 22, date: true },
+        { label: 'Overall', w: 18 }], rows: stations },
+      { name: withCheck ? 'Problem times' : 'Fault times', cols: [{ label: 'Station', w: 26 }, { label: 'Station ID', w: 10 }, { label: 'Instrument', w: 18 },
+        { label: 'Result', w: 9 }, { label: 'What', w: 44 }, { label: 'From', w: 22, date: true }, { label: 'To', w: 22, date: true }, { label: 'Hours', w: 8 },
+        { label: 'Readings', w: 10 }], rows: times }
     ]);
   }
 
   // The Fault report controls (period list, month when needed, PDF/JPEG/Excel).
   function faultBar(group, count) {
     var code = state.maint.fperiod || '24h', thisMonth = dateOf(Date.now()).slice(0, 7);
-    return '<div class="month-bar fault-bar no-print"><span class="dl-l">' + icon('alert') + '<span><b>Fault report</b>' +
+    return '<div class="month-bar fault-bar no-print"><span class="dl-l">' + icon('alert') + '<span><b>' + (group ? 'Fault and check report' : 'Fault report') + '</b>' +
       (group ? ' · ' + count + ' station' + (count === 1 ? '' : 's') : '') + '</span></span>' +
       '<select id="wn-fperiod" aria-label="Fault report period">' + FAULT_PERIODS.map(function (x) {
         return '<option value="' + x[0] + '"' + (x[0] === code ? ' selected' : '') + '>' + x[1] + '</option>';
@@ -3345,7 +3477,8 @@
       '<button class="btn sm" data-act="' + (group ? 'gfault' : 'fault') + '-pdf"' + (count ? '' : ' disabled') + '>' + icon('download') + 'PDF</button>' +
       '<button class="btn sm" data-act="' + (group ? 'gfault' : 'fault') + '-jpeg"' + (count ? '' : ' disabled') + '>' + icon('download') + 'JPEG</button>' +
       '<button class="btn sm" data-act="' + (group ? 'gfault' : 'fault') + '-xlsx"' + (count ? '' : ' disabled') + '>' + icon('download') + 'Excel</button>' +
-      '<span class="dl-n">Faults only, with causes, effect on the data, actions and repair checks. Excel lists one fault per row.</span></div>';
+      '<span class="dl-n">' + (group ? 'Faults and instruments that need checking, for the stations listed.' : 'Faults only for this station.') +
+      ' With causes, effect on the data, actions and repair checks. Excel lists one ' + (group ? 'problem' : 'fault') + ' per row.</span></div>';
   }
 
   var ROUTINE = [
