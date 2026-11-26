@@ -68,6 +68,7 @@
     pickerQuery: '',
     board: { filter: 'all', query: '', sort: { key: 'severity', dir: 1 } },
     maint: { filter: 'all', query: '', open: null },   // maintenance tab
+    zoom: null,                          // instrument zoom view {id, key, a, t0, t1}
     scan: null                           // {running, total, done, started, finished}
   };
 
@@ -700,6 +701,8 @@
     search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
     signal: '<path d="M5 18v-2M9.5 18v-5M14 18V9M18.5 18V5"/>',
     back: '<path d="M15 18l-6-6 6-6"/>',
+    download: '<path d="M12 4v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19h14"/>',
+    zoom: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/><path d="M11 8.5v5M8.5 11h5"/>',
     print: '<path d="M7 9V4h10v5"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M7 14h10v6H7z"/>',
     grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/>' +
       '<rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
@@ -1316,7 +1319,11 @@
 
   function component(key) {
     var c = COMPONENTS.filter(function (x) { return x.key === key; })[0];
-    return { key: key, name: c.name, icon: c.icon, result: 'ok', findings: [], actions: [] };
+    return { key: key, name: c.name, icon: c.icon, result: 'ok', findings: [], actions: [], marks: [] };
+  }
+  // Remember when a problem was seen, for the zoom chart and the readings table. No `to` = a single reading.
+  function mark(c, result, from, to, label) {
+    c.marks.push({ result: result, from: from, to: to == null ? null : to, label: label });
   }
   function flag(c, result, finding, actions) {
     if (RESULT[result].rank > RESULT[c.result].rank) c.result = result;
@@ -1377,6 +1384,7 @@
       else c.findings.push({ result: 'ok', text: pct + ' received.' });
       if (gap.ms - 600000 >= QC.gapCheckMin * 60000) {
         flag(c, 'check', 'Longest gap: ' + hrs(gap.ms - 600000) + ' after ' + clock(gap.at) + '.', [ACT.comms]);
+        mark(c, 'check', gap.at, gap.at + gap.ms, 'Longest gap');
       }
       if (lastAge != null && lastAge > CONFIG.lateAfterMin) flag(c, 'check', 'Latest report was ' + ageText(lastAge) + '.', [ACT.comms]);
     }
@@ -1390,6 +1398,10 @@
     var dups = Object.keys(stamps).filter(function (k) { return stamps[k] > 1; }).length;
     if (offGrid) flag(c, 'check', offGrid + ' record(s) not on the 10-minute schedule.', [ACT.clock]);
     if (dups) flag(c, 'check', dups + ' duplicated timestamp(s).', [ACT.clock]);
+    rows.forEach(function (r) {
+      if (Math.round(r.t / 60000) % 10 !== 0) mark(c, 'check', r.t, null, 'Off schedule');
+      if (stamps[r.t] > 1) mark(c, 'check', r.t, null, 'Duplicate time');
+    });
     if (!rows.length && c.result === 'ok') c.result = 'na';
     else if (c.result === 'ok') c.findings.push({ result: 'ok', text: 'Records are on the 10-minute schedule with no duplicates.' });
 
@@ -1405,6 +1417,10 @@
       if (vmin < QC.battery.fault) flag(c, 'fault', range + ' Dropped below ' + QC.battery.fault + ' V.', [ACT.battery, ACT.charging]);
       else if (vmin < QC.battery.check) flag(c, 'check', range + ' Dropped below ' + QC.battery.check + ' V.', [ACT.battery, ACT.charging]);
       else c.findings.push({ result: 'ok', text: range });
+      rows.forEach(function (r) {
+        var v = r.raw && r.raw.battery;
+        if (v != null && v > 0 && v < 30 && v < QC.battery.check) mark(c, v < QC.battery.fault ? 'fault' : 'check', r.t, null, 'Low battery');
+      });
       if (dayVolts.length >= 6 && Math.max.apply(null, dayVolts) < QC.battery.charged) {
         flag(c, 'check', 'No charging seen: daytime voltage stayed below ' + QC.battery.charged + ' V.', [ACT.charging]);
       }
@@ -1426,6 +1442,12 @@
       var bad = present.filter(function (v) { return CONFIG.sentinels.indexOf(v) !== -1 || v < lim[0] || v > lim[1]; });
       if (bad.length) {
         var share = bad.length / present.length;
+        rows.forEach(function (r) {
+          var v = r.raw ? r.raw[rawKey] : null;
+          if (v != null && (CONFIG.sentinels.indexOf(v) !== -1 || v < lim[0] || v > lim[1])) {
+            mark(comp, share > 0.1 ? 'fault' : 'check', r.t, null, CONFIG.sentinels.indexOf(v) !== -1 ? 'Error code ' + v : 'Out of range');
+          }
+        });
         flag(comp, share > 0.1 ? 'fault' : 'check', bad.length + ' reading(s) outside the plausible range ' + lim[0] + '–' + lim[1] + ' ' + unitText +
           ' (e.g. ' + bad[0] + ').', [act]);
       }
@@ -1438,7 +1460,7 @@
         if (good[i].t - good[i - 1].t > 600000) continue;
         if (rainSkip && ((good[i].raw.rain || 0) > 0 || (good[i - 1].raw.rain || 0) > 0)) continue;
         var d = Math.abs(good[i].raw[rawKey] - good[i - 1].raw[rawKey]);
-        if (d > max) { n++; worst = Math.max(worst, d); }
+        if (d > max) { n++; worst = Math.max(worst, d); mark(comp, 'check', good[i].t, null, 'Jump of ' + fmt(d) + ' ' + unitText); }
       }
       if (n) flag(comp, 'check', n + ' sudden jump(s) in ' + label + ' (up to ' + fmt(worst) + ' ' + unitText + ' in 10 min; limit ' + max + ').', [act]);
     }
@@ -1446,6 +1468,7 @@
       var run = longestFlat(good, function (r) { return r.raw[rawKey]; }, tol);
       if (run.ms >= hours * 3600000) {
         var long = run.ms >= 3 * hours * 3600000;
+        mark(comp, long ? 'fault' : 'check', run.from, run.to, long ? 'Stuck' : 'Barely changed');
         flag(comp, long ? 'fault' : 'check', label + ' barely changed (within ' + tol + ') for ' + hrs(run.ms) + ' around ' + run.value +
           ' (' + clock(run.from) + '–' + clock(run.to) + ')' + (long ? ' — sensor appears stuck.' : ' — may be stuck.'), [act]);
       }
@@ -1455,20 +1478,27 @@
     if (good) {
       stepTest(comps.temp, good, 'temp', QC.step.temp, 'temperature', '°C', ACT.probe, true);
       flatTest(comps.temp, good, 'temp', QC.flat.temp, QC.flatHours.temp, 'Temperature', ACT.probe);
-      var inverted = good.filter(function (r) { return r.raw.tmin != null && r.raw.tmax != null && r.raw.tmin > r.raw.tmax + 0.05; }).length;
+      var invRows = good.filter(function (r) { return r.raw.tmin != null && r.raw.tmax != null && r.raw.tmin > r.raw.tmax + 0.05; });
+      invRows.forEach(function (r) { mark(comps.temp, 'check', r.t, null, 'Min above max'); });
+      var inverted = invRows.length;
       if (inverted) flag(comps.temp, 'check', inverted + ' record(s) with minimum above maximum.', [ACT.probe]);
       if (comps.temp.result === 'ok') comps.temp.findings.push({ result: 'ok', text: 'Range, step and persistence tests passed.' });
     }
 
     good = sensor('rh', 'rh', 'rh', 'humidity', '%', ACT.probe);
     if (good) {
-      var over = rows.filter(function (r) { return r.raw && r.raw.rh != null && r.raw.rh > QC.rhHigh && r.raw.rh <= 110; }).length;
+      var overRows = rows.filter(function (r) { return r.raw && r.raw.rh != null && r.raw.rh > QC.rhHigh && r.raw.rh <= 110; });
+      overRows.forEach(function (r) { mark(comps.rh, 'check', r.t, null, 'Above 100%'); });
+      var over = overRows.length;
       if (over) flag(comps.rh, 'check', over + ' reading(s) above 100%.', [ACT.probe]);
       var wet = longestFlat(good, function (r) { return r.raw.rh >= 99.5 ? 100 : null; }, 0);
+      if (wet.ms >= QC.rhSaturatedHours * 3600000) mark(comps.rh, 'check', wet.from, wet.to, 'Saturated');
       if (wet.ms >= QC.rhSaturatedHours * 3600000) flag(comps.rh, 'check', 'At 100% for ' + hrs(wet.ms) + ' — sensor may be wet or saturated.', [ACT.rhFilter]);
       stepTest(comps.rh, good, 'rh', QC.step.rh, 'humidity', '%', ACT.probe, true);
       flatTest(comps.rh, good.filter(function (r) { return r.raw.rh < 95; }), 'rh', QC.flat.rh, QC.flatHours.rh, 'Humidity', ACT.probe);
-      var dewBad = good.filter(function (r) { var dp = dewPoint(r.raw.temp, r.raw.rh); return dp != null && r.raw.temp != null && dp > r.raw.temp + 0.1; }).length;
+      var dewRows = good.filter(function (r) { var dp = dewPoint(r.raw.temp, r.raw.rh); return dp != null && r.raw.temp != null && dp > r.raw.temp + 0.1; });
+      dewRows.forEach(function (r) { mark(comps.rh, 'check', r.t, null, 'Dew point above temperature'); });
+      var dewBad = dewRows.length;
       if (dewBad) flag(comps.rh, 'check', dewBad + ' record(s) with dew point above air temperature.', [ACT.probe]);
       if (comps.rh.result === 'ok') comps.rh.findings.push({ result: 'ok', text: 'Range, step and persistence tests passed.' });
     }
@@ -1484,10 +1514,12 @@
     if (good) {
       var stuck = longestFlat(good, function (r) { return r.raw.wind; }, 0, function (r, v) { return v > 0; });
       if (stuck.ms >= QC.windStuckHours * 3600000) {
+        mark(comps.wind, 'fault', stuck.from, stuck.to, 'Speed stuck');
         flag(comps.wind, 'fault', 'Wind speed fixed at ' + stuck.value + ' ' + CONFIG.windUnit + ' for ' + hrs(stuck.ms) + '.', [ACT.cups]);
       }
       var calm = longestFlat(good, function (r) { return r.raw.wind; }, 0, function (r, v) { return v === 0; });
       if (calm.ms >= QC.calmHours * 3600000) {
+        mark(comps.wind, 'check', calm.from, calm.to, 'Calm (0)');
         flag(comps.wind, 'check', 'Wind speed 0 for ' + hrs(calm.ms) + ' — cups may be stuck (or it was very calm).', [ACT.cups]);
       }
       var vane = { ms: 0 }, start = -1;
@@ -1496,31 +1528,38 @@
         if (k > 0 && r.t - good[k - 1].t > MAX_STEP_MS) start = -1;
         if (d != null && moving && start >= 0 && angleDiff(d, good[start].raw.dir) <= QC.vaneSpread) {
           var ms = r.t - good[start].t;
-          if (ms > vane.ms) vane = { ms: ms, dir: good[start].raw.dir };
+          if (ms > vane.ms) vane = { ms: ms, dir: good[start].raw.dir, from: good[start].t, to: r.t };
         } else {
           start = d != null && moving ? k : -1;
         }
       }
       if (vane.ms >= QC.vaneStuckHours * 3600000) {
+        mark(comps.wind, 'fault', vane.from, vane.to, 'Vane stuck');
         flag(comps.wind, 'fault', 'Wind direction fixed near ' + Math.round(vane.dir) + '° for ' + hrs(vane.ms) + ' while the wind was blowing.', [ACT.vane]);
       }
-      var badDir = rows.filter(function (r) { return r.raw && r.raw.dir != null && (r.raw.dir < 0 || r.raw.dir > 360); }).length;
+      var dirRows = rows.filter(function (r) { return r.raw && r.raw.dir != null && (r.raw.dir < 0 || r.raw.dir > 360); });
+      dirRows.forEach(function (r) { mark(comps.wind, 'check', r.t, null, 'Direction out of range'); });
+      var badDir = dirRows.length;
       if (badDir) flag(comps.wind, 'check', badDir + ' wind direction value(s) outside 0–360°.', [ACT.vane]);
       if (comps.wind.result === 'ok') comps.wind.findings.push({ result: 'ok', text: 'Speed and direction tests passed.' });
     }
 
     good = sensor('rain', 'rain', 'rain', 'rainfall', 'mm', ACT.gauge);
     if (good) {
-      var big = good.filter(function (r) { return r.raw.rain > QC.rainStep; }).length;
+      var bigRows = good.filter(function (r) { return r.raw.rain > QC.rainStep; });
+      bigRows.forEach(function (r) { mark(comps.rain, 'check', r.t, null, 'Too much for 10 min'); });
+      var big = bigRows.length;
       if (big) flag(comps.rain, 'check', big + ' ten-minute total(s) above ' + QC.rainStep + ' mm.', [ACT.counter]);
       var mism = 0;
       for (var j = 1; j < good.length; j++) {
         var a = good[j - 1].raw.total, b = good[j].raw.total;
         if (a == null || b == null || b < a || good[j].t - good[j - 1].t > 600000) continue;   // reset or gap
-        if (Math.abs((b - a) - good[j].raw.rain) > QC.totalMismatch) mism++;
+        if (Math.abs((b - a) - good[j].raw.rain) > QC.totalMismatch) { mism++; mark(comps.rain, 'check', good[j].t, null, 'Total does not match'); }
       }
       if (mism) flag(comps.rain, 'check', mism + ' record(s) where the running total does not match the 10-minute rainfall.', [ACT.counter]);
-      var clearRain = good.filter(function (r) { return r.raw.rain > 0 && r.raw.solar != null && r.raw.solar > 600 && r.raw.rh != null && r.raw.rh < 60; }).length;
+      var clearRows = good.filter(function (r) { return r.raw.rain > 0 && r.raw.solar != null && r.raw.solar > 600 && r.raw.rh != null && r.raw.rh < 60; });
+      var clearRain = clearRows.length;
+      if (clearRain >= 2) clearRows.forEach(function (r) { mark(comps.rain, 'check', r.t, null, 'Rain under strong sun'); });
       if (clearRain >= 2) flag(comps.rain, 'check', clearRain + ' rain record(s) under strong sun and dry air — possible false tips.', [ACT.gauge, ACT.counter]);
       if (comps.rain.result === 'ok') {
         var tot = good.reduce(function (sum, r) { return sum + r.raw.rain; }, 0);
@@ -1532,6 +1571,7 @@
     if (good) {
       var night = good.filter(function (r) { return isNight(r.t) && r.raw.solar > QC.nightSolar; });
       if (night.length) {
+        night.forEach(function (r) { mark(comps.solar, 'check', r.t, null, 'Sunlight at night'); });
         flag(comps.solar, 'check', night.length + ' night-time reading(s) above ' + QC.nightSolar + ' W/m² (up to ' +
           Math.round(Math.max.apply(null, night.map(function (r) { return r.raw.solar; }))) + ') — sensor offset or wrong logger clock.', [ACT.pyrano, ACT.clock]);
       }
@@ -1604,12 +1644,29 @@
   function resultPill(result) { return '<span class="res ' + result + '">' + RESULT[result].label + '</span>'; }
   function overallPill(o) { return '<span class="ovr ' + o + '">' + OVERALL[o].label + '</span>'; }
 
-  function maintView() {
-    if (state.maint.open) return maintReport(state.maint.open);
+  // Stations in the Maintenance list, with counts and the ones the filter and search let through.
+  function maintRows() {
     var m = state.maint;
     var rows = scopedStations().map(function (st) { return { st: st, a: maintFor(st) }; });
     var counts = { all: rows.length, good: 0, attention: 0, maintenance: 0, offline: 0, pending: 0 };
     rows.forEach(function (r) { counts[r.a ? r.a.overall : 'pending']++; });
+    var q = m.query.trim().toLowerCase();
+    var shown = rows.filter(function (r) {
+      var o = r.a ? r.a.overall : 'pending';
+      if (m.filter !== 'all' && o !== m.filter) return false;
+      return !q || r.st.name.toLowerCase().indexOf(q) !== -1 || r.st.siteId.indexOf(q) !== -1;
+    });
+    shown.sort(function (x, y) {
+      var a = OVERALL[x.a ? x.a.overall : 'pending'].rank, b = OVERALL[y.a ? y.a.overall : 'pending'].rank;
+      return b - a || x.st.label.localeCompare(y.st.label);
+    });
+    return { rows: rows, counts: counts, shown: shown };
+  }
+
+  function maintView() {
+    if (state.maint.open) return maintReport(state.maint.open);
+    var m = state.maint;
+    var mv = maintRows(), counts = mv.counts, shown = mv.shown;
 
     var scan = state.scan;
     var bar;
@@ -1632,17 +1689,6 @@
       return '<button class="chip m-' + c[2] + (m.filter === c[0] ? ' on' : '') + '" data-mfilter="' + c[0] + '"><span class="n">' + counts[c[0]] + '</span> ' + c[1] + '</button>';
     }).join('');
 
-    var q = m.query.trim().toLowerCase();
-    var shown = rows.filter(function (r) {
-      var o = r.a ? r.a.overall : 'pending';
-      if (m.filter !== 'all' && o !== m.filter) return false;
-      return !q || r.st.name.toLowerCase().indexOf(q) !== -1 || r.st.siteId.indexOf(q) !== -1;
-    });
-    shown.sort(function (x, y) {
-      var a = OVERALL[x.a ? x.a.overall : 'pending'].rank, b = OVERALL[y.a ? y.a.overall : 'pending'].rank;
-      return b - a || x.st.label.localeCompare(y.st.label);
-    });
-
     var head = '<tr><th>Station</th><th>Status</th>' + COMPONENTS.map(function (c) {
       return '<th class="cc" title="' + c.name + '">' + icon(c.icon) + '</th>';
     }).join('') + '<th>Main finding</th></tr>';
@@ -1662,6 +1708,11 @@
     return '<div class="maint">' + bar +
       '<div class="board-bar">' + scopeSwitch() + chips + '<div class="search">' + icon('search') +
       '<input type="search" id="wn-maint-q" placeholder="Search station or ID" value="' + esc(m.query) + '"></div></div>' +
+      '<div class="dl-bar"><span class="dl-l">' + icon('download') + '<span><b>Download report</b> · the ' + shown.length + ' station' + (shown.length === 1 ? '' : 's') +
+      ' listed below' + (counts.pending && !(scan && scan.running) ? ' (assess them first for full results)' : '') + '</span></span>' +
+      '<span class="dl-b"><button class="btn" data-act="net-pdf"' + (shown.length ? '' : ' disabled') + '>PDF</button>' +
+      '<button class="btn" data-act="net-jpeg"' + (shown.length ? '' : ' disabled') + '>JPEG</button></span>' +
+      '<span class="dl-n">For one station or one instrument, open the station below.</span></div>' +
       '<div class="table-wrap"><table class="mtable"><thead>' + head + '</thead><tbody>' +
       (body || '<tr><td colspan="12" class="muted center">No stations match.</td></tr>') + '</tbody></table></div>' +
       '<p class="fine">Checks follow WMO practice for automatic weather station data (WMO-No. 8 and the WMO guidelines on quality control of AWS data): ' +
@@ -1723,16 +1774,23 @@
       return '<section class="mcomp ' + c.result + '"><header>' + '<span class="tile-ic" style="--c:' +
         (c.result === 'fault' ? C.red : c.result === 'check' ? C.yellow : c.result === 'ok' ? C.green : C.grey) + '">' + icon(c.icon) + '</span>' +
         '<h3>' + c.name + '</h3>' + resultPill(c.result) + '</header>' +
+        (a.rows.length ? '<div class="zoomable" data-zoom="' + c.key + '" title="Zoom in">' : '<div>') +
         (c.findings.length ? '<ul class="finds">' + c.findings.map(function (f) { return '<li class="' + f.result + '">' + esc(f.text) + '</li>'; }).join('') + '</ul>'
           : c.result === 'na' ? '<p class="muted small">No data to test.</p>' : '') +
-        (c.key === 'comms' && a.rows.length ? completenessStrip(a) : spark) +
+        (c.key === 'comms' && a.rows.length ? completenessStrip(a) : spark) + '</div>' +
         (c.actions.length ? '<div class="acts"><b>Recommended action</b><ul>' + c.actions.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>' : '') +
+        '<div class="mtools no-print">' + (a.rows.length ? '<button class="btn sm" data-zoom="' + c.key + '">' + icon('zoom') + 'Zoom in</button>' : '') +
+        '<span class="mt-dl">' + icon('download') + '<button class="link" data-ipdf="' + c.key + '">PDF</button>' +
+        '<button class="link" data-ijpeg="' + c.key + '">JPEG</button></span></div>' +
         '</section>';
     }).join('');
     var counts = { fault: 0, check: 0 };
     a.components.forEach(function (c) { if (counts[c.result] != null) counts[c.result]++; });
     return '<div class="report">' +
-      '<div class="report-bar">' + back + '<button class="btn" data-act="maint-print">' + icon('print') + 'Print report</button></div>' +
+      '<div class="report-bar">' + back + '<div class="rb-r"><span class="muted small">Whole station report:</span>' +
+      '<button class="btn" data-act="rep-pdf">' + icon('download') + 'PDF</button>' +
+      '<button class="btn" data-act="rep-jpeg">' + icon('download') + 'JPEG</button>' +
+      '<button class="btn" data-act="maint-print">' + icon('print') + 'Print</button></div></div>' +
       '<article class="card">' +
       '<header class="rep-h"><div><div class="tagline">Station maintenance report</div><h2>' + esc(st.label) + '</h2>' +
       '<div class="sub">Station ' + esc(st.siteId) + (st.lat != null ? ' · approx. ' + st.lat.toFixed(3) + '°N, ' + st.lon.toFixed(3) + '°E' : '') + '</div></div>' +
@@ -1752,7 +1810,8 @@
         'Compare readings with reference instruments; record any sensor change or calibration in the station log.'
       ].map(function (x) { return '<li><span class="box"></span>' + x + '</li>'; }).join('') + '</ul></section>' +
       '<p class="fine">Assessment uses the station’s uploaded 10-minute data and WMO-style quality-control tests. ' +
-      'Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment.</p>' +
+      'Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment. ' +
+      '<span class="no-print">Select an instrument’s chart (or Zoom in) to see its readings in detail and download that instrument’s report.</span></p>' +
       '</article></div>';
   }
 
@@ -1763,6 +1822,881 @@
     fetchHistory(id).then(function (rows) { d.rows = rows; d.error = null; d.at = Date.now(); })
       .catch(function (err) { d.error = (err && err.message) || 'Could not load this station.'; })
       .then(function () { d.loading = false; render(); });
+  }
+
+  // ---------- instrument charts, zoom view and report downloads (PDF / JPEG) ----------
+  //
+  // Charts are drawn on a <canvas> so the same drawing serves the zoom view on screen and the
+  // downloaded reports. Reports are laid out as A4 pages and saved as JPEG images; the PDF is a
+  // small file that holds one page image per page, so no outside library is needed.
+
+  var TEN_MIN = 600000, HOUR = 3600000;
+  var MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function phtDate(ms) { return new Date(ms + 8 * HOUR); }
+  function stamp(ms) {      // "26 Nov 2026, 2:30 PM"
+    var d = phtDate(ms);
+    return d.getUTCDate() + ' ' + MONTH_SHORT[d.getUTCMonth()] + ' ' + d.getUTCFullYear() + ', ' + clock(ms);
+  }
+  function fileStamp(ms) {  // "2026-11-26_1430"
+    var d = phtDate(ms);
+    return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()) + '_' + pad2(d.getUTCHours()) + pad2(d.getUTCMinutes());
+  }
+  function fileSafe(s) { return String(s).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, ''); }
+  function compOf(a, key) { return a.components.filter(function (x) { return x.key === key; })[0]; }
+
+  var UNIT = { temp: '°C', rh: '%', pressure: 'hPa', wind: CONFIG.windUnit, dir: '°', rain: 'mm', total: 'mm', solar: 'W/m²', battery: 'V' };
+
+  // Readings as sent by the station (error codes left out; out-of-range values kept so they can be seen).
+  function rawPts(rows, key) {
+    var pts = [];
+    rows.forEach(function (r) {
+      var v = r.raw ? r.raw[key] : null;
+      if (v != null && CONFIG.sentinels.indexOf(v) === -1) pts.push({ t: r.t, v: v });
+    });
+    return pts;
+  }
+  // Periods with no records (longer than one missed report).
+  function gapsOf(rows, from, to) {
+    var gaps = [], prev = from - TEN_MIN;
+    rows.forEach(function (r) {
+      if (r.t - prev > 2 * TEN_MIN) gaps.push({ from: prev, to: r.t });
+      prev = r.t;
+    });
+    if (to - prev > 2 * TEN_MIN) gaps.push({ from: prev, to: to });
+    return gaps.map(function (g) { return { from: Math.max(g.from, from), to: g.to }; });
+  }
+  // Night (8 PM–4 AM), used to shade the solar chart.
+  function nightsOf(from, to) {
+    var out = [], d = phtDate(from), day0 = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - 8 * HOUR;
+    for (var s = day0 - 4 * HOUR; s < to; s += 24 * HOUR) out.push({ from: Math.max(from, s), to: Math.min(to, s + 8 * HOUR) });
+    return out.filter(function (n) { return n.to > n.from; });
+  }
+  // What to show for one instrument: chart panels, guide lines, readings table.
+  function instrumentSpec(a, key) {
+    var c = compOf(a, key), rows = a.rows;
+    var spec = { key: key, comp: c, from: a.from, to: a.to, panels: [], shade: [], gaps: gapsOf(rows, a.from, a.to), marks: c.marks || [], cols: [], cells: null };
+    function line(k, name, color) { return { name: name, unit: UNIT[k], color: color, pts: rawPts(rows, k), type: 'line' }; }
+    if (key === 'comms') {
+      var per = [];
+      for (var t = a.from; t < a.to; t += HOUR) {
+        var n = 0, seen = {};
+        rows.forEach(function (r) { if (r.t > t && r.t <= t + HOUR && !seen[r.t]) { seen[r.t] = 1; n++; } });
+        per.push({ t: t + HOUR, v: n });
+      }
+      spec.panels.push({ label: 'Records received per hour', unit: 'records', fixed: [0, QC.slotsPerHour + 1],
+        series: [{ name: 'Records', unit: 'per hour', color: C.blue, pts: per, type: 'bar', barMs: HOUR }],
+        lines: [{ v: QC.slotsPerHour, color: C.green, label: 'Expected ' + QC.slotsPerHour }] });
+      spec.cols = ['Hour ending', 'Records', 'Missing'];
+      spec.cells = function (t0, t1) {
+        return per.filter(function (p) { return p.t > t0 && p.t - HOUR < t1; }).map(function (p) {
+          var miss = Math.max(0, QC.slotsPerHour - p.v);
+          return { t: p.t, cells: [clock(p.t), String(p.v), miss ? String(miss) : '—'], flag: miss ? (p.v ? 'Some records missing' : 'No records') : '', result: miss ? (p.v ? 'check' : 'fault') : '' };
+        });
+      };
+      spec.mainSeries = per;
+    } else if (key === 'clock') {
+      var off = rows.map(function (r) { var m = (r.t / 60000) % 10; return { t: r.t, v: round(m > 5 ? m - 10 : m, 2) }; });
+      spec.panels.push({ label: 'Minutes off the 10-minute schedule', unit: 'min', fixed: [-5, 5],
+        series: [{ name: 'Offset', unit: 'min', color: C.indigo, pts: off, type: 'dot' }], lines: [{ v: 0, color: C.green, label: 'On schedule' }] });
+      spec.cols = ['Time', 'Logged as', 'Offset (min)'];
+      spec.cells = function (t0, t1) {
+        return rows.filter(function (r) { return r.t >= t0 && r.t <= t1; }).map(function (r) {
+          var m = (r.t / 60000) % 10; m = round(m > 5 ? m - 10 : m, 2);
+          return { t: r.t, cells: [clock(r.t), (r.raw && r.raw.at) || '—', m ? fmt(m, 2) : '0'] };
+        });
+      };
+      spec.mainSeries = off;
+    } else {
+      var P = {
+        power: { s: [line('battery', 'Battery', C.green)], unit: 'V',
+          lines: [{ v: QC.battery.charged, color: C.blue, label: 'Charging ' + QC.battery.charged + ' V' },
+            { v: QC.battery.check, color: C.yellow, label: 'Check ' + QC.battery.check + ' V' }, { v: QC.battery.fault, color: C.red, label: 'Fault ' + QC.battery.fault + ' V' }],
+          cols: [['battery', 'Battery (V)']] },
+        temp: { s: [line('temp', 'Average', C.orange), line('tmax', 'Max', '#f4a259'), line('tmin', 'Min', '#f6c08a')], unit: '°C',
+          cols: [['temp', 'Temp (°C)'], ['tmin', 'Min'], ['tmax', 'Max']] },
+        rh: { s: [line('rh', 'Humidity', C.teal)], unit: '%', lines: [{ v: 100, color: C.red, label: '100%' }],
+          cols: [['rh', 'RH (%)'], ['dew', 'Dew point (°C)'], ['temp', 'Temp (°C)']] },
+        pressure: { s: [line('pressure', 'Pressure', C.indigo)], unit: 'hPa', cols: [['pressure', 'Pressure (hPa)']] },
+        wind: { s: [line('wind', 'Speed', C.teal)], unit: CONFIG.windUnit, floor0: true, cols: [['wind', 'Speed (' + CONFIG.windUnit + ')'], ['dir', 'Direction']] },
+        rain: { s: [{ name: '10-min rain', unit: 'mm', color: C.blue, pts: rawPts(rows, 'rain'), type: 'bar', barMs: TEN_MIN }], unit: 'mm', floor0: true,
+          cols: [['rain', '10-min (mm)'], ['total', 'Running total (mm)']] },
+        solar: { s: [line('solar', 'Solar', C.yellow)], unit: 'W/m²', floor0: true,
+          lines: [{ v: QC.nightSolar, color: C.slate, label: 'Night limit ' + QC.nightSolar }], cols: [['solar', 'Solar (W/m²)']] }
+      }[key];
+      P.s = P.s.filter(function (x, i) { return i === 0 || x.pts.length; });
+      spec.panels.push({ label: c.name, unit: P.unit, series: P.s, lines: P.lines || [], floor0: P.floor0, includeLines: key === 'power' });
+      if (key === 'wind') {
+        spec.panels.push({ label: 'Wind direction', unit: '°', fixed: [0, 360], ticks: [[0, 'N'], [90, 'E'], [180, 'S'], [270, 'W'], [360, 'N']], h: 0.7,
+          series: [{ name: 'Direction', unit: '°', color: C.violet, pts: rawPts(rows, 'dir'), type: 'dot' }], lines: [] });
+      }
+      if (key === 'rain') {
+        var tot = rawPts(rows, 'total');
+        if (tot.length) spec.panels.push({ label: 'Running total', unit: 'mm', h: 0.7, floor0: true, series: [{ name: 'Running total', unit: 'mm', color: C.indigo, pts: tot, type: 'line' }], lines: [] });
+      }
+      if (key === 'solar') spec.shade = nightsOf(a.from, a.to).map(function (n) { return { from: n.from, to: n.to, color: 'rgba(91,107,140,.10)', label: 'Night' }; });
+      spec.cols = ['Time'].concat(P.cols.map(function (x) { return x[1]; }));
+      spec.cells = function (t0, t1) {
+        return rows.filter(function (r) { return r.t >= t0 && r.t <= t1; }).map(function (r) {
+          return { t: r.t, cells: [clock(r.t)].concat(P.cols.map(function (x) {
+            var k = x[0], v;
+            if (k === 'dew') v = r.raw ? dewPoint(r.raw.temp, r.raw.rh) : null;
+            else v = r.raw ? r.raw[k] : null;
+            if (v == null) return '—';
+            if (k === 'dir') return Math.round(v) + '° ' + compassPoint(v);
+            return CONFIG.sentinels.indexOf(v) !== -1 ? String(v) : fmt(v, k === 'battery' || k === 'rain' || k === 'total' ? 2 : 1);
+          })) };
+        });
+      };
+      spec.mainSeries = P.s[0].pts;
+      spec.unit = P.unit;
+    }
+    // Flag text and result for each table row.
+    var base = spec.cells;
+    spec.rowsIn = function (t0, t1) {
+      return base(t0, t1).map(function (row) {
+        var hits = spec.marks.filter(function (m) { return m.to == null ? Math.abs(m.from - row.t) < 30000 : row.t >= m.from && row.t <= m.to; });
+        if (hits.length) {
+          var worst = hits.reduce(function (w, m) { return RESULT[m.result].rank > RESULT[w].rank ? m.result : w; }, 'ok');
+          row.flag = hits.map(function (m) { return m.label; }).filter(function (x, i, arr) { return arr.indexOf(x) === i; }).join(', ');
+          row.result = worst;
+        }
+        return row;
+      }).reverse();   // newest first
+    };
+    return spec;
+  }
+
+  // Summary numbers for the main reading within a time range.
+  function statsIn(spec, t0, t1) {
+    var pts = (spec.mainSeries || []).filter(function (p) { return p.t >= t0 && p.t <= t1; });
+    var vals = pts.map(function (p) { return p.v; });
+    var flagged = spec.marks.filter(function (m) { return (m.to == null ? m.from : m.to) >= t0 && m.from <= t1; }).length;
+    var expected = Math.max(1, Math.round((t1 - t0) / TEN_MIN));
+    var recs = spec.key === 'comms' ? vals.reduce(function (s, v) { return s + v; }, 0) : pts.length;
+    var out = [];
+    if (spec.key === 'comms') {
+      out.push(['Records', recs + ' of ' + expected], ['Missing', String(Math.max(0, expected - recs))]);
+    } else if (vals.length) {
+      var u = spec.key === 'clock' ? ' min' : ' ' + spec.unit;
+      out.push(['Latest', fmt(vals[vals.length - 1], spec.key === 'power' ? 2 : 1) + u],
+        ['Min', fmt(Math.min.apply(null, vals)) + u], ['Max', fmt(Math.max.apply(null, vals)) + u],
+        ['Average', fmt(vals.reduce(function (s, v) { return s + v; }, 0) / vals.length) + u]);
+      if (spec.key === 'rain') out.push(['Total', fmt(vals.reduce(function (s, v) { return s + v; }, 0)) + ' mm']);
+      out.push(['Records', pts.length + ' of ' + expected]);
+    } else {
+      out.push(['Records', '0 of ' + expected]);
+    }
+    out.push(['Flagged', String(flagged)]);
+    return out;
+  }
+
+  // ---- chart drawing (shared by screen and reports) ----
+
+  function niceStep(span, n) {
+    var raw = span / Math.max(1, n), p = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10)), f = raw / p;
+    return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * p;
+  }
+  var TIME_STEPS = [10, 20, 30, 60, 120, 180, 360, 720, 1440].map(function (m) { return m * 60000; });
+  function timeTick(ms) {
+    var d = phtDate(ms), h = d.getUTCHours(), m = d.getUTCMinutes();
+    if (!h && !m) return MONTH_SHORT[d.getUTCMonth()] + ' ' + d.getUTCDate();
+    return (h % 12 || 12) + (m ? ':' + pad2(m) : '') + (h < 12 ? ' AM' : ' PM');
+  }
+  var RES_COLOR = { ok: C.green, check: C.yellow, fault: C.red, na: C.grey };
+
+  // Draws the chart into ctx (in CSS/layout pixels). Returns the plot geometry for hover handling.
+  function drawChart(ctx, w, h, spec, view, pal, hover, sel) {
+    var L = 64, R = 16, T = 12, B = 30, GAP = 20;
+    var t0 = view.t0, t1 = view.t1, span = Math.max(60000, t1 - t0);
+    function X(t) { return L + (w - L - R) * (t - t0) / span; }
+    ctx.save();
+    ctx.fillStyle = pal.bg; ctx.fillRect(0, 0, w, h);
+    ctx.font = '600 11px ' + FONT_STACK; ctx.textBaseline = 'middle';
+    var top = T, bot = h - B;
+    function band(from, to, color) {
+      var a = Math.max(L, X(from)), b = Math.min(w - R, X(to));
+      if (b > a) { ctx.fillStyle = color; ctx.fillRect(a, top, b - a, bot - top); }
+    }
+    spec.shade.forEach(function (s) { band(s.from, s.to, s.color); });
+    spec.gaps.forEach(function (g) { band(g.from, g.to, pal.gap); });
+    spec.marks.forEach(function (m) { if (m.to != null) band(m.from, m.to, m.result === 'fault' ? 'rgba(229,72,77,.16)' : 'rgba(240,180,41,.20)'); });
+    if (sel) band(Math.min(sel.a, sel.b), Math.max(sel.a, sel.b), 'rgba(47,107,255,.15)');
+    // vertical time grid (labels are drawn last)
+    var stepMs = TIME_STEPS.filter(function (s) { return (w - L - R) * s / span >= 78; })[0] || TIME_STEPS[TIME_STEPS.length - 1];
+    var tickTimes = [];
+    for (var tt = Math.ceil((t0 + 8 * HOUR) / stepMs) * stepMs - 8 * HOUR; tt <= t1; tt += stepMs) tickTimes.push(tt);
+    ctx.strokeStyle = pal.grid; ctx.lineWidth = 1;
+    tickTimes.forEach(function (t) { var x = Math.round(X(t)) + 0.5; ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bot); ctx.stroke(); });
+
+    var weights = spec.panels.map(function (p) { return p.h || 1; });
+    var total = weights.reduce(function (s, x) { return s + x; }, 0);
+    var avail = bot - top - GAP * (spec.panels.length - 1), py = top, geo = [];
+    spec.panels.forEach(function (p, pi) {
+      var ph = avail * weights[pi] / total, y0 = py + 14, y1 = py + ph;
+      py += ph + GAP;
+      var vis = [];
+      p.series.forEach(function (s) { s.pts.forEach(function (q) { if (q.t >= t0 - TEN_MIN && q.t <= t1 + TEN_MIN) vis.push(q.v); }); });
+      var lo, hi;
+      if (p.fixed) { lo = p.fixed[0]; hi = p.fixed[1]; }
+      else {
+        var vv = vis.concat(p.includeLines ? p.lines.map(function (l) { return l.v; }) : []);
+        lo = vv.length ? Math.min.apply(null, vv) : 0; hi = vv.length ? Math.max.apply(null, vv) : 1;
+        if (p.floor0) lo = Math.min(0, lo);
+        if (hi - lo < 1e-6) {
+          if (p.floor0 && lo >= 0) { lo = 0; hi = Math.max(1, hi * 1.5); } else { lo -= 1; hi += 1; }
+        }
+        var padv = (hi - lo) * 0.08; hi += padv; if (!p.floor0 || lo < 0) lo -= padv;
+      }
+      function Y(v) { return y1 - (y1 - y0) * (v - lo) / (hi - lo); }
+      // panel title
+      ctx.fillStyle = pal.text; ctx.textAlign = 'left'; ctx.font = '700 11.5px ' + FONT_STACK;
+      ctx.fillText(p.label + (p.unit ? ' (' + p.unit + ')' : ''), L, py - ph - GAP + 6 > 0 ? y0 - 9 : y0 - 9);
+      ctx.font = '600 11px ' + FONT_STACK;
+      // y grid
+      var ticks = p.ticks && (y1 - y0) / p.ticks.length < 16 ? p.ticks.filter(function (tk, i) { return i % 2 === 0; }) : p.ticks;
+      if (!ticks) {
+        var step = niceStep(hi - lo, Math.max(2, Math.floor((y1 - y0) / 36)));
+        ticks = [];
+        for (var v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) {
+          var dec = step < 1 ? Math.min(2, Math.ceil(-Math.log(step) / Math.LN10)) : 0;
+          ticks.push([v, (Math.abs(v) < 1e-9 ? 0 : v).toFixed(dec)]);
+        }
+      }
+      ticks.forEach(function (tk) {
+        var y = Math.round(Y(tk[0])) + 0.5;
+        ctx.strokeStyle = pal.grid; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w - R, y); ctx.stroke();
+        ctx.fillStyle = pal.muted; ctx.textAlign = 'right'; ctx.fillText(tk[1], L - 8, y);
+      });
+      ctx.save();
+      ctx.beginPath(); ctx.rect(L, y0 - 2, w - L - R, y1 - y0 + 4); ctx.clip();
+      // guide lines
+      (p.lines || []).forEach(function (l) {
+        if (l.v < lo || l.v > hi) return;
+        var y = Math.round(Y(l.v)) + 0.5;
+        ctx.strokeStyle = l.color; ctx.setLineDash([6, 4]); ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w - R, y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = l.color; ctx.textAlign = 'right'; ctx.font = '700 10.5px ' + FONT_STACK;
+        ctx.fillText(l.label, w - R - 4, y - 8); ctx.font = '600 11px ' + FONT_STACK;
+      });
+      var visCount = 0;
+      p.series[0].pts.forEach(function (q) { if (q.t >= t0 && q.t <= t1) visCount++; });
+      var dots = visCount <= 90;
+      p.series.forEach(function (s, si) {
+        var pts = s.pts.filter(function (q) { return q.t >= t0 - (s.barMs || TEN_MIN) && q.t <= t1 + (s.barMs || TEN_MIN); });
+        ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
+        if (s.type === 'bar') {
+          pts.forEach(function (q) {
+            var xa = X(q.t - s.barMs), xb = X(q.t), y = Y(Math.max(lo, q.v)), yz = Y(Math.max(lo, 0));
+            var bw = Math.max(1, xb - xa - (xb - xa > 4 ? 1.5 : 0.5));
+            if (q.v > 0) ctx.fillRect(xa + 0.5, Math.min(y, yz), bw, Math.max(1, Math.abs(yz - y)));
+          });
+        } else if (s.type === 'dot') {
+          pts.forEach(function (q) { ctx.beginPath(); ctx.arc(X(q.t), Y(q.v), 2.6, 0, 7); ctx.fill(); });
+        } else {
+          ctx.lineWidth = si === 0 ? 2.2 : 1.4; ctx.lineJoin = 'round';
+          ctx.beginPath();
+          pts.forEach(function (q, i) {
+            var brk = !i || q.t - pts[i - 1].t > 2 * TEN_MIN;
+            if (brk) ctx.moveTo(X(q.t), Y(q.v)); else ctx.lineTo(X(q.t), Y(q.v));
+          });
+          ctx.stroke();
+          if (dots && si === 0) pts.forEach(function (q) { ctx.beginPath(); ctx.arc(X(q.t), Y(q.v), 2.4, 0, 7); ctx.fill(); });
+        }
+      });
+      // flagged single readings: ring around the reading
+      if (pi === 0 || spec.key === 'wind') {
+        var main = p.series[0].pts;
+        spec.marks.forEach(function (m) {
+          if (m.to != null || m.from < t0 || m.from > t1) return;
+          if (spec.key === 'wind' && (pi === 0) !== !/Direction/.test(m.label)) return;
+          var q = null;
+          main.forEach(function (x) { if (Math.abs(x.t - m.from) < 30000) q = x; });
+          var y = q ? Y(Math.min(hi, Math.max(lo, q.v))) : y1 - 6;
+          ctx.strokeStyle = RES_COLOR[m.result]; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(X(m.from), y, 5.5, 0, 7); ctx.stroke();
+        });
+      }
+      ctx.restore();
+      ctx.strokeStyle = pal.axis; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(L + 0.5, y0 - 2); ctx.lineTo(L + 0.5, y1 + 0.5); ctx.lineTo(w - R, y1 + 0.5); ctx.stroke();
+      geo.push({ p: p, y0: y0, y1: y1, Y: Y, lo: lo, hi: hi });
+    });
+    // time axis
+    ctx.fillStyle = pal.muted; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.font = '600 11px ' + FONT_STACK;
+    tickTimes.forEach(function (t) { ctx.fillText(timeTick(t), Math.min(w - R - 20, Math.max(L + 20, X(t))), bot + 8); });
+    // hover read-out
+    if (hover != null && hover >= t0 && hover <= t1) {
+      var hx = Math.round(X(hover)) + 0.5;
+      ctx.strokeStyle = pal.text; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.moveTo(hx, top); ctx.lineTo(hx, bot); ctx.stroke(); ctx.globalAlpha = 1;
+      var lines = [stamp(hover)];
+      geo.forEach(function (g) {
+        g.p.series.forEach(function (s) {
+          var best = null;
+          s.pts.forEach(function (q) { if (Math.abs(q.t - hover) <= (s.barMs || TEN_MIN) / 2 && (!best || Math.abs(q.t - hover) < Math.abs(best.t - hover))) best = q; });
+          if (best) {
+            lines.push(s.name + ': ' + (s.name === 'Direction' ? Math.round(best.v) + '° ' + compassPoint(best.v) : fmt(best.v, Math.abs(best.v) < 20 ? 2 : 1) + ' ' + (s.unit || '')));
+            ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(X(best.t), g.Y(Math.min(g.hi, Math.max(g.lo, best.v))), 4.5, 0, 7); ctx.fill();
+          }
+        });
+      });
+      spec.marks.forEach(function (m) {
+        if (m.to == null ? Math.abs(m.from - hover) <= TEN_MIN / 2 : hover >= m.from && hover <= m.to) lines.push('⚑ ' + m.label);
+      });
+      spec.gaps.forEach(function (g) { if (hover > g.from && hover < g.to) lines.push('No data (' + hrs(g.to - g.from - TEN_MIN) + ')'); });
+      ctx.font = '700 12px ' + FONT_STACK; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+      var bw = Math.max.apply(null, lines.map(function (s) { return ctx.measureText(s).width; })) + 20, bh = lines.length * 17 + 12;
+      var bx = hx + 14 + bw > w - R ? hx - 14 - bw : hx + 14, by = top + 6;
+      ctx.fillStyle = pal.tipBg; ctx.strokeStyle = pal.grid;
+      roundRect(ctx, bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
+      lines.forEach(function (s, i) {
+        ctx.fillStyle = i ? (s.charAt(0) === '⚑' ? C.red : pal.text) : pal.muted;
+        ctx.font = (i ? '600' : '700') + ' 12px ' + FONT_STACK;
+        ctx.fillText(s, bx + 10, by + 7 + i * 17);
+      });
+    }
+    ctx.restore();
+    return { L: L, R: R, w: w, t0: t0, t1: t1 };
+  }
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  var FONT_STACK = 'WNunito,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
+  var PAPER = { bg: '#ffffff', text: '#16213a', muted: '#5e6b80', grid: '#e8edf4', axis: '#b8c3d3', gap: 'rgba(138,150,168,.16)', tipBg: '#ffffff', panel: '#f5f7fb' };
+  function screenPalette() {
+    var cs = getComputedStyle(document.documentElement);
+    function v(n) { return cs.getPropertyValue(n).trim(); }
+    var dark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+    return { bg: v('--card') || '#fff', text: v('--text'), muted: v('--muted'), grid: v('--line'), axis: v('--glass-line'),
+      gap: dark ? 'rgba(160,170,190,.13)' : PAPER.gap, tipBg: v('--card') || '#fff' };
+  }
+
+  // ---- zoom view ----
+
+  function openZoom(id, key) {
+    var st = stationById(id), a = st && maintFor(st);
+    if (!a) return;
+    state.zoom = { id: id, key: key, a: a, t0: a.from, t1: a.to, hover: null, sel: null };
+    renderZoom();
+  }
+  function closeZoom() { state.zoom = null; var z = document.getElementById('wn-zoom'); z.hidden = true; z.innerHTML = ''; }
+  function setZoomRange(t0, t1) {
+    var z = state.zoom, a = z.a, span = Math.max(30 * 60000, t1 - t0);
+    if (span >= a.to - a.from) { z.t0 = a.from; z.t1 = a.to; }
+    else {
+      t0 = Math.max(a.from, Math.min(t0, a.to - span));
+      z.t0 = t0; z.t1 = t0 + span;
+    }
+    renderZoom();
+  }
+  function rangeLabel(t0, t1) { return stamp(t0) + ' – ' + (phtDate(t0).getUTCDate() === phtDate(t1).getUTCDate() ? clock(t1) : stamp(t1)); }
+
+  function renderZoom() {
+    var z = state.zoom, box = document.getElementById('wn-zoom');
+    if (!z) { closeZoom(); return; }
+    var st = stationById(z.id), a = z.a, c = compOf(a, z.key), spec = z.spec = instrumentSpec(a, z.key);
+    var full = z.t0 <= a.from && z.t1 >= a.to;
+    var hrsShown = Math.round((z.t1 - z.t0) / HOUR * 10) / 10;
+    var ranges = [24, 12, 6, 3, 1].map(function (n) {
+      var on = Math.abs(hrsShown - n) < 0.05 && Math.abs(z.t1 - a.to) < 60000;
+      return '<button class="seg' + (on ? ' on' : '') + '" data-zrange="' + n + '">' + n + ' h</button>';
+    }).join('');
+    var stats = statsIn(spec, z.t0, z.t1).map(function (s) { return '<div class="zst"><span>' + s[0] + '</span><b>' + esc(s[1]) + '</b></div>'; }).join('');
+    var rows = spec.rowsIn(z.t0, z.t1);
+    var table = '<table class="ztab"><thead><tr>' + spec.cols.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '<th>Flag</th></tr></thead><tbody>' +
+      (rows.length ? rows.map(function (r) {
+        return '<tr class="' + (r.result || '') + '" data-zt="' + r.t + '">' + r.cells.map(function (x) { return '<td>' + esc(x) + '</td>'; }).join('') +
+          '<td class="zf">' + esc(r.flag || '') + '</td></tr>';
+      }).join('') : '<tr><td colspan="' + (spec.cols.length + 1) + '" class="muted center">No records in this period.</td></tr>') + '</tbody></table>';
+    box.innerHTML = '<div class="zsheet" role="dialog" aria-label="' + esc(c.name) + ' — zoom view">' +
+      '<header class="zh"><span class="tile-ic" style="--c:' + RES_COLOR[c.result] + '">' + icon(c.icon) + '</span>' +
+      '<div class="zh-t"><div class="tagline">Instrument view</div><h2>' + esc(c.name) + ' ' + resultPill(c.result) + '</h2>' +
+      '<div class="sub">' + esc(st.label) + ' · Station ' + esc(st.siteId) + '</div></div>' +
+      '<div class="zh-b"><button class="btn" data-act="zoom-pdf">' + icon('download') + 'PDF</button>' +
+      '<button class="btn" data-act="zoom-jpeg">' + icon('download') + 'JPEG</button>' +
+      '<button class="icon-btn" data-act="zoom-close" title="Close" aria-label="Close">' + icon('close') + '</button></div></header>' +
+      '<div class="zbar"><div class="segs">' + ranges + '</div>' +
+      '<button class="icon-btn" data-zpan="-1" title="Earlier" aria-label="Earlier"' + (z.t0 <= a.from ? ' disabled' : '') + '>' + icon('back') + '</button>' +
+      '<button class="icon-btn flip" data-zpan="1" title="Later" aria-label="Later"' + (z.t1 >= a.to ? ' disabled' : '') + '>' + icon('back') + '</button>' +
+      '<span class="zrange">' + rangeLabel(z.t0, z.t1) + '</span>' +
+      '<span class="zhint">Drag across the chart to zoom in' + (full ? '' : ' · double-click to show all') + '</span></div>' +
+      '<div class="zchart"><canvas id="wn-zcanvas"></canvas></div>' +
+      '<div class="zlegend">' + zoomLegend(spec) + '</div>' +
+      '<div class="zstats">' + stats + '</div>' +
+      '<div class="zgrid"><div class="zfind">' +
+      (c.findings.length ? '<ul class="finds">' + c.findings.map(function (f) { return '<li class="' + f.result + '">' + esc(f.text) + '</li>'; }).join('') + '</ul>' : '<p class="muted small">No data to test.</p>') +
+      (c.actions.length ? '<div class="acts"><b>Recommended action</b><ul>' + c.actions.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>' : '') +
+      '</div><div class="ztable"><div class="ztable-h">Readings (' + rows.length + ', newest first)</div><div class="ztable-s">' + table + '</div></div></div></div>';
+    box.hidden = false;
+    drawZoom();
+    bindZoomCanvas();
+  }
+  function zoomLegend(spec) {
+    var items = [];
+    spec.panels.forEach(function (p) { p.series.forEach(function (s) { items.push('<span><i style="background:' + s.color + '"></i>' + esc(s.name) + '</span>'); }); });
+    if (spec.gaps.length) items.push('<span><i class="sq gap"></i>No data</span>');
+    var spans = spec.marks.filter(function (m) { return m.to != null; });
+    if (spans.length) {
+      var fault = spans.some(function (m) { return m.result === 'fault'; });
+      items.push('<span><i class="sq" style="background:' + (fault ? 'rgba(229,72,77,.3)' : 'rgba(240,180,41,.4)') + '"></i>Flagged period</span>');
+    }
+    if (spec.marks.some(function (m) { return m.to == null; })) items.push('<span><i class="ring"></i>Flagged reading</span>');
+    if (spec.key === 'solar') items.push('<span><i class="sq night"></i>Night</span>');
+    return items.join('');
+  }
+  function drawZoom() {
+    var z = state.zoom, cv = document.getElementById('wn-zcanvas');
+    if (!z || !cv) return;
+    var w = cv.parentNode.clientWidth, h = Math.max(260, Math.min(460, Math.round(w * 0.42))) + (z.spec.panels.length > 1 ? 120 : 0);
+    var dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    z.geo = drawChart(ctx, w, h, z.spec, { t0: z.t0, t1: z.t1 }, screenPalette(), z.hover, z.sel);
+  }
+  function bindZoomCanvas() {
+    var cv = document.getElementById('wn-zcanvas');
+    function tAt(e) {
+      var z = state.zoom, g = z.geo, r = cv.getBoundingClientRect(), x = e.clientX - r.left;
+      return g.t0 + (g.t1 - g.t0) * (x - g.L) / (g.w - g.L - g.R);
+    }
+    cv.addEventListener('pointermove', function (e) {
+      var z = state.zoom; if (!z) return;
+      var t = tAt(e);
+      z.hover = t >= z.t0 && t <= z.t1 ? t : null;
+      if (z.sel) z.sel.b = Math.max(z.t0, Math.min(z.t1, t));
+      drawZoom();
+    });
+    cv.addEventListener('pointerleave', function () { var z = state.zoom; if (z && !z.sel) { z.hover = null; drawZoom(); } });
+    cv.addEventListener('pointerdown', function (e) {
+      var z = state.zoom, t = tAt(e);
+      if (t < z.t0 || t > z.t1) return;
+      z.sel = { a: t, b: t }; cv.setPointerCapture(e.pointerId);
+    });
+    cv.addEventListener('pointerup', function () {
+      var z = state.zoom; if (!z || !z.sel) return;
+      var a = Math.min(z.sel.a, z.sel.b), b = Math.max(z.sel.a, z.sel.b);
+      z.sel = null;
+      if (b - a >= 20 * 60000) setZoomRange(a, b); else drawZoom();
+    });
+    cv.addEventListener('dblclick', function () { var z = state.zoom; setZoomRange(z.a.from, z.a.to); });
+    cv.addEventListener('wheel', function (e) {
+      var z = state.zoom; if (!z || !(e.ctrlKey || e.metaKey || e.altKey)) return;   // plain wheel keeps scrolling the page
+      e.preventDefault();
+      var t = tAt(e), f = e.deltaY > 0 ? 1.25 : 0.8;
+      setZoomRange(t - (t - z.t0) * f, t - (t - z.t0) * f + (z.t1 - z.t0) * f);
+    }, { passive: false });
+  }
+
+  // ---- report layout (A4 pages drawn on canvas) ----
+
+  var DOC = { W: 820, H: 1160, M: 44, S: 2 };   // layout pixels; A4 proportions; drawn at 2× for sharp text
+  var measureCtx = document.createElement('canvas').getContext('2d');
+  function dfont(size, weight) { return (weight || 400) + ' ' + size + 'px ' + FONT_STACK; }
+  function wrap(text, width, f) {
+    measureCtx.font = f;
+    var out = [];
+    String(text).split('\n').forEach(function (para) {
+      var line = '';
+      para.split(' ').forEach(function (word) {
+        var test = line ? line + ' ' + word : word;
+        if (measureCtx.measureText(test).width <= width || !line) line = test;
+        else { out.push(line); line = word; }
+      });
+      out.push(line);
+    });
+    return out;
+  }
+  var PILL = { ok: ['#1d8a5a', '#e4f5ec'], check: ['#9a5b00', '#fff2d9'], fault: ['#b4232a', '#fde5e5'], na: ['#5e6b80', '#eef2f7'],
+    good: ['#1d8a5a', '#e4f5ec'], attention: ['#9a5b00', '#fff2d9'], maintenance: ['#b4232a', '#fde5e5'], offline: ['#ffffff', '#5b6b8c'], pending: ['#5e6b80', '#eef2f7'] };
+  function pill(ctx, x, y, text, kind, size) {   // y = top; returns width
+    size = size || 11;
+    ctx.font = dfont(size, 800);
+    var w = ctx.measureText(text).width + size * 1.6, h = size * 1.8;
+    ctx.fillStyle = PILL[kind][1]; roundRect(ctx, x, y, w, h, h / 2); ctx.fill();
+    ctx.fillStyle = PILL[kind][0]; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    ctx.fillText(text, x + size * 0.8, y + h / 2 + 0.5);
+    return w;
+  }
+  function pillWidth(text, size) { size = size || 11; measureCtx.font = dfont(size, 800); return measureCtx.measureText(text).width + size * 1.6; }
+
+  function Doc(title) { this.title = title; this.blocks = []; }
+  Doc.prototype.add = function (b) { this.blocks.push(b); return this; };
+  Doc.prototype.space = function (h) { return this.add({ h: h, draw: function () {} }); };
+  Doc.prototype.text = function (text, o) {
+    o = o || {};
+    var size = o.size || 12.5, f = dfont(size, o.weight), lh = Math.round(size * 1.5), indent = o.indent || 0;
+    var lines = wrap(text, DOC.W - 2 * DOC.M - indent - (o.right || 0), f), after = o.after == null ? 4 : o.after;
+    return this.add({ h: lines.length * lh + after, keepNext: o.keepNext, draw: function (ctx, x, y) {
+      ctx.font = f; ctx.fillStyle = o.color || PAPER.text; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      lines.forEach(function (ln, i) { ctx.fillText(ln, x + indent, y + i * lh + lh / 2); });
+      if (o.bullet) { ctx.fillStyle = o.bullet; ctx.beginPath(); ctx.arc(x + indent - 9, y + lh / 2, 3.5, 0, 7); ctx.fill(); }
+      if (o.box) { ctx.strokeStyle = '#b8c3d3'; ctx.lineWidth = 1.5; roundRect(ctx, x + indent - 17, y + lh / 2 - 6, 12, 12, 3); ctx.stroke(); }
+    } });
+  };
+  Doc.prototype.callout = function (text, kind) {
+    var f = dfont(13, 700), lines = wrap(text, DOC.W - 2 * DOC.M - 28, f), lh = 20, h = lines.length * lh + 18;
+    return this.add({ h: h + 12, draw: function (ctx, x, y) {
+      ctx.fillStyle = PILL[kind][1]; roundRect(ctx, x, y, DOC.W - 2 * DOC.M, h, 10); ctx.fill();
+      ctx.fillStyle = PILL[kind][0]; ctx.font = f; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      lines.forEach(function (ln, i) { ctx.fillText(ln, x + 14, y + 9 + i * lh + lh / 2); });
+    } });
+  };
+  Doc.prototype.rule = function () {
+    return this.add({ h: 14, draw: function (ctx, x, y) { ctx.fillStyle = PAPER.grid; ctx.fillRect(x, y + 6, DOC.W - 2 * DOC.M, 1.5); } });
+  };
+  // Report title block.
+  Doc.prototype.header = function (kicker, title, sub, kind, label, right) {
+    var tl = wrap(title, DOC.W - 2 * DOC.M - 200, dfont(24, 800));
+    var h = 26 + tl.length * 32 + 24 + 14;
+    return this.add({ h: h, draw: function (ctx, x, y) {
+      var W = DOC.W - 2 * DOC.M;
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      ctx.fillStyle = '#2f6bff'; ctx.font = dfont(13, 800); ctx.fillText('AutoWx', x, y + 8);
+      measureCtx.font = dfont(13, 800);
+      ctx.fillStyle = PAPER.muted; ctx.font = dfont(10, 700); ctx.fillText('  ·  ' + kicker.toUpperCase(), x + measureCtx.measureText('AutoWx').width, y + 8);
+      ctx.fillStyle = PAPER.text; ctx.font = dfont(24, 800);
+      tl.forEach(function (ln, i) { ctx.fillText(ln, x, y + 26 + i * 32 + 16); });
+      ctx.fillStyle = PAPER.muted; ctx.font = dfont(12.5, 600); ctx.fillText(sub, x, y + 26 + tl.length * 32 + 12);
+      if (kind) { var pw = pillWidth(label, 14); pill(ctx, x + W - pw, y + 28, label, kind, 14); }
+      ctx.fillStyle = PAPER.muted; ctx.font = dfont(11.5, 600); ctx.textAlign = 'right';
+      (right || []).forEach(function (r, i) { ctx.fillText(r, x + W, y + 68 + i * 17); });
+      ctx.textAlign = 'left';
+      ctx.fillStyle = PAPER.grid; ctx.fillRect(x, y + h - 8, W, 1.5);
+    } });
+  };
+  // Heading for one instrument, with its result.
+  Doc.prototype.section = function (title, result) {
+    return this.add({ h: 34, keepNext: true, draw: function (ctx, x, y) {
+      ctx.fillStyle = RES_COLOR[result]; roundRect(ctx, x, y + 6, 5, 22, 2.5); ctx.fill();
+      ctx.fillStyle = PAPER.text; ctx.font = dfont(16, 800); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      ctx.fillText(title, x + 14, y + 17);
+      measureCtx.font = dfont(16, 800);
+      pill(ctx, x + 26 + measureCtx.measureText(title).width, y + 7, RESULT[result].label, result, 11);
+    } });
+  };
+  Doc.prototype.chart = function (spec, view, height) {
+    return this.add({ h: height + 10, draw: function (ctx, x, y) {
+      ctx.save(); ctx.translate(x, y);
+      drawChart(ctx, DOC.W - 2 * DOC.M, height, spec, view, PAPER, null, null);
+      ctx.restore();
+    } });
+  };
+  // Row of small figures (label above value).
+  Doc.prototype.stats = function (items) {
+    return this.add({ h: 58, draw: function (ctx, x, y) {
+      var W = DOC.W - 2 * DOC.M, cw = W / items.length;
+      items.forEach(function (s, i) {
+        ctx.fillStyle = PAPER.panel; roundRect(ctx, x + i * cw + 2, y, cw - 4, 48, 8); ctx.fill();
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = PAPER.muted; ctx.font = dfont(10.5, 700); ctx.fillText(s[0].toUpperCase(), x + i * cw + 12, y + 14);
+        ctx.fillStyle = PAPER.text; ctx.font = dfont(14, 800); ctx.fillText(s[1], x + i * cw + 12, y + 33);
+      });
+    } });
+  };
+  // Table: cols = [{label, w (share of width)}]; rows = arrays of cells (text, or {pill: result} / {dot: result}).
+  Doc.prototype.table = function (cols, rows, o) {
+    o = o || {};
+    var W = DOC.W - 2 * DOC.M, size = o.size || 11.5, lh = Math.round(size * 1.45), self = this;
+    var xs = [], acc = 0;
+    cols.forEach(function (c) { xs.push(acc); acc += c.w * W; });
+    var head = { h: 26, keepNext: true, draw: function (ctx, x, y) {
+      ctx.fillStyle = PAPER.panel; ctx.fillRect(x, y, W, 24);
+      ctx.fillStyle = PAPER.muted; ctx.font = dfont(10, 800); ctx.textBaseline = 'middle';
+      cols.forEach(function (c, i) { ctx.textAlign = c.center ? 'center' : 'left'; ctx.fillText(c.label.toUpperCase(), x + xs[i] + (c.center ? c.w * W / 2 : 6), y + 12); });
+      ctx.textAlign = 'left';
+    } };
+    self.add(head);
+    rows.forEach(function (row, ri) {
+      var tint = row.tint;
+      var cells = (row.cells || row).map(function (cell, i) {
+        if (cell && typeof cell === 'object') return cell;
+        return { lines: wrap(cell == null ? '' : cell, cols[i].w * W - 12, dfont(size, cols[i].bold ? 700 : 400)) };
+      });
+      var n = Math.max.apply(null, cells.map(function (c) { return c.lines ? c.lines.length : 1; }));
+      var h = n * lh + 10;
+      self.add({ h: h, repeatHead: head, draw: function (ctx, x, y) {
+        if (tint) { ctx.fillStyle = tint; ctx.fillRect(x, y, W, h); }
+        else if (ri % 2) { ctx.fillStyle = '#fafbfd'; ctx.fillRect(x, y, W, h); }
+        ctx.fillStyle = PAPER.grid; ctx.fillRect(x, y + h - 1, W, 1);
+        cells.forEach(function (c, i) {
+          var cx = x + xs[i] + 6;
+          if (c.pill) pill(ctx, cx, y + 5, RESULT[c.pill] ? RESULT[c.pill].label : OVERALL[c.pill].label, c.pill, 10);
+          else if (c.dot) { ctx.fillStyle = RES_COLOR[c.dot]; ctx.beginPath(); ctx.arc(x + xs[i] + cols[i].w * W / 2, y + 5 + lh / 2, 5, 0, 7); ctx.fill(); }
+          else {
+            ctx.fillStyle = c.color || (cols[i].muted ? PAPER.muted : PAPER.text);
+            ctx.font = dfont(size, cols[i].bold ? 700 : 400); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+            c.lines.forEach(function (ln, k) { ctx.fillText(ln, cx, y + 5 + k * lh + lh / 2); });
+          }
+        });
+      } });
+    });
+    return this.space(8);
+  };
+
+  // Splits blocks into pages; a table header is repeated at the top of a new page.
+  Doc.prototype.paginate = function () {
+    var top = DOC.M, bottom = DOC.H - DOC.M - 22, pages = [[]], y = top, bl = this.blocks;
+    for (var i = 0; i < bl.length; i++) {
+      var b = bl[i], need = b.h;
+      for (var j = i; bl[j] && bl[j].keepNext && bl[j + 1]; j++) need += bl[j + 1].h;
+      need = Math.min(need, bottom - top);
+      if (y + need > bottom && y > top) {
+        pages.push([]); y = top;
+        if (b.repeatHead) { pages[pages.length - 1].push({ b: b.repeatHead, y: y }); y += b.repeatHead.h; }
+      }
+      pages[pages.length - 1].push({ b: b, y: y }); y += b.h;
+    }
+    return pages;
+  };
+  function newCanvas(w, h) {
+    var cv = document.createElement('canvas');
+    cv.width = Math.round(w * DOC.S); cv.height = Math.round(h * DOC.S);
+    var ctx = cv.getContext('2d'); ctx.scale(DOC.S, DOC.S);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+    return { cv: cv, ctx: ctx };
+  }
+  function footer(ctx, y, title, page) {
+    var x = DOC.M, W = DOC.W - 2 * DOC.M;
+    ctx.fillStyle = PAPER.grid; ctx.fillRect(x, y, W, 1);
+    ctx.fillStyle = PAPER.muted; ctx.font = dfont(9.5, 600); ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left'; ctx.fillText('AutoWx · ' + title, x, y + 12);
+    ctx.textAlign = 'right'; ctx.fillText((page ? page + ' · ' : '') + 'Generated ' + stamp(Date.now()), x + W, y + 12);
+    ctx.textAlign = 'left';
+  }
+  Doc.prototype.pageCanvases = function () {
+    var pages = this.paginate(), title = this.title;
+    return pages.map(function (items, i) {
+      var c = newCanvas(DOC.W, DOC.H);
+      items.forEach(function (it) { it.b.draw(c.ctx, DOC.M, it.y); });
+      footer(c.ctx, DOC.H - DOC.M - 8, title, 'Page ' + (i + 1) + ' of ' + pages.length);
+      return c.cv;
+    });
+  };
+  // One long image (no page breaks). Too tall for one image → one image per page.
+  Doc.prototype.longCanvases = function () {
+    var total = DOC.M + this.blocks.reduce(function (s, b) { return s + b.h; }, 0) + 40 + DOC.M / 2;
+    if (total * DOC.S > 30000) return this.pageCanvases();
+    var c = newCanvas(DOC.W, total), y = DOC.M;
+    this.blocks.forEach(function (b) { b.draw(c.ctx, DOC.M, y); y += b.h; });
+    footer(c.ctx, y + 10, this.title, '');
+    return [c.cv];
+  };
+
+  // ---- the two reports ----
+
+  function stationSub(st) { return 'Station ' + st.siteId + (st.lat != null ? ' · approx. ' + st.lat.toFixed(3) + '°N, ' + st.lon.toFixed(3) + '°E' : ''); }
+  function mainFinding(c) {
+    var bad = c.findings.filter(function (f) { return f.result !== 'ok'; });
+    return (bad[0] || c.findings[0] || { text: c.result === 'na' ? 'No data to test.' : '' }).text;
+  }
+  function addFindings(doc, c) {
+    if (!c.findings.length) doc.text(c.result === 'na' ? 'No data to test.' : 'No findings.', { color: PAPER.muted, indent: 18 });
+    c.findings.forEach(function (f) { doc.text(f.text, { indent: 18, bullet: RES_COLOR[f.result] }); });
+  }
+  function addActions(doc, c) {
+    if (!c.actions.length) return;
+    doc.text('Recommended action', { weight: 800, size: 12, keepNext: true, after: 2 });
+    c.actions.forEach(function (x) { doc.text(x, { indent: 18, bullet: '#2f6bff', size: 12 }); });
+  }
+
+  // Whole station: summary, every instrument with its 24-hour chart, actions, site visit checklist.
+  function stationDoc(st, a) {
+    var o = OVERALL[a.overall], doc = new Doc(st.label + ' — station maintenance report');
+    var counts = { fault: 0, check: 0 };
+    a.components.forEach(function (c) { if (counts[c.result] != null) counts[c.result]++; });
+    doc.header('Station maintenance report', st.label, stationSub(st), a.overall, o.label,
+      ['Assessed ' + stamp(a.to), 'Data from ' + stamp(a.from) + ' (' + QC.windowHours + ' h)']);
+    doc.callout(o.say + (counts.fault || counts.check ? ' (' + [counts.fault ? counts.fault + ' fault' + (counts.fault > 1 ? 's' : '') : '',
+      counts.check ? counts.check + ' to check' : ''].filter(Boolean).join(', ') + ')' : ''),
+      a.overall === 'good' ? 'ok' : a.overall === 'attention' ? 'check' : a.overall === 'pending' ? 'na' : 'fault');
+    doc.text('Summary', { weight: 800, size: 15, keepNext: true, after: 6 });
+    doc.table([{ label: 'Instrument', w: 0.25, bold: true }, { label: 'Result', w: 0.15 }, { label: 'Main finding', w: 0.6 }],
+      a.components.map(function (c) { return [c.name, { pill: c.result }, mainFinding(c)]; }));
+    a.components.forEach(function (c) {
+      doc.space(6).section(c.name, c.result);
+      addFindings(doc, c);
+      if (a.rows.length) { doc.space(4); doc.chart(instrumentSpec(a, c.key), { t0: a.from, t1: a.to }, c.key === 'wind' || c.key === 'rain' ? 300 : 180); }
+      addActions(doc, c);
+    });
+    doc.space(10).text('Routine site visit checklist', { weight: 800, size: 15, keepNext: true, after: 6 });
+    ROUTINE.forEach(function (x) { doc.text(x, { indent: 22, box: true }); });
+    doc.space(8).text('Assessment uses the station’s uploaded 10-minute data and WMO-style quality-control tests. ' +
+      'Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment.', { size: 10.5, color: PAPER.muted });
+    doc.text('Checked by: ______________________     Date of visit: ______________     Signature: ______________', { size: 11.5, color: PAPER.muted, before: 0 });
+    return doc;
+  }
+
+  // One instrument: figures, chart for the chosen period, findings, actions and every reading.
+  function instrumentDoc(st, a, key, view) {
+    var c = compOf(a, key), spec = instrumentSpec(a, key);
+    var doc = new Doc(st.label + ' — ' + c.name);
+    doc.header('Instrument report', c.name + ' — ' + st.label, stationSub(st), c.result, RESULT[c.result].label,
+      ['Period ' + rangeLabel(view.t0, view.t1), 'Assessed ' + stamp(a.to)]);
+    doc.stats(statsIn(spec, view.t0, view.t1));
+    doc.chart(spec, view, spec.panels.length > 1 ? 400 : 300);
+    doc.text('Findings (' + QC.windowHours + '-hour assessment)', { weight: 800, size: 14, keepNext: true, after: 4 });
+    addFindings(doc, c);
+    addActions(doc, c);
+    var rows = spec.rowsIn(view.t0, view.t1);
+    doc.space(8).text('Readings (' + rows.length + ', newest first)', { weight: 800, size: 14, keepNext: true, after: 6 });
+    var n = spec.cols.length;
+    var cols = spec.cols.map(function (h, i) { return { label: h, w: i === 0 ? 0.14 : (0.62 - 0.14) / Math.max(1, n - 1) }; });
+    cols.push({ label: 'Flag', w: 0.38 });
+    doc.table(cols, rows.map(function (r) {
+      return { cells: r.cells.concat([r.flag || '']), tint: r.result === 'fault' ? '#fdecec' : r.result === 'check' ? '#fff6e2' : null };
+    }), { size: 10.5 });
+    return doc;
+  }
+  var ROUTINE = [
+    'Check the site: fence, vegetation cut low, no new obstructions near the sensors.',
+    'Clean the radiation shield, rain gauge funnel and bucket, pyranometer dome and solar panel.',
+    'Check that the anemometer and wind vane turn freely and the vane points to true north.',
+    'Check cables, connectors, grounding and the enclosure seal; look for water, insects or corrosion.',
+    'Check the battery voltage, charge controller and logger clock; download stored data.',
+    'Compare readings with reference instruments; record any sensor change or calibration in the station log.'
+  ];
+
+  // ---- saving files ----
+
+  function toJpeg(cv) {
+    return new Promise(function (ok, fail) {
+      cv.toBlob(function (b) { b ? ok(b) : fail(new Error('Could not make the image.')); }, 'image/jpeg', 0.92);
+    });
+  }
+  // A PDF whose pages are the A4 page images.
+  function makePdf(images) {
+    var enc = new TextEncoder(), parts = [], len = 0, offsets = [];
+    function push(x) { var b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); len += b.length; }
+    function obj(n, body) { offsets[n] = len; push(n + ' 0 obj\n'); body.forEach(push); push('\nendobj\n'); }
+    var W = 595.28, H = 841.89, n = images.length;
+    push('%PDF-1.4\n%âãÏÓ\n');
+    obj(1, ['<< /Type /Catalog /Pages 2 0 R >>']);
+    obj(2, ['<< /Type /Pages /Count ' + n + ' /Kids [' + images.map(function (_, i) { return (3 + 3 * i) + ' 0 R'; }).join(' ') + '] >>']);
+    images.forEach(function (im, i) {
+      var p = 3 + 3 * i, cs = 'q ' + W + ' 0 0 ' + H + ' 0 0 cm /Im' + i + ' Do Q';
+      obj(p, ['<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + W + ' ' + H + '] /Resources << /XObject << /Im' + i + ' ' + (p + 2) + ' 0 R >> >> /Contents ' + (p + 1) + ' 0 R >>']);
+      obj(p + 1, ['<< /Length ' + cs.length + ' >>\nstream\n' + cs + '\nendstream']);
+      obj(p + 2, ['<< /Type /XObject /Subtype /Image /Width ' + im.w + ' /Height ' + im.h + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' +
+        im.bytes.length + ' >>\nstream\n', im.bytes, '\nendstream']);
+    });
+    var xref = len, count = 3 + 3 * n;
+    push('xref\n0 ' + count + '\n0000000000 65535 f \n');
+    for (var k = 1; k < count; k++) push(('000000000' + offsets[k]).slice(-10) + ' 00000 n \n');
+    push('trailer\n<< /Size ' + count + ' /Root 1 0 R >>\nstartxref\n' + xref + '\n%%EOF\n');
+    return new Blob(parts, { type: 'application/pdf' });
+  }
+  function saveFile(blob, name) {
+    var url = URL.createObjectURL(blob), link = document.createElement('a');
+    link.href = url; link.download = name; document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
+  function fontsReady() {
+    if (!document.fonts || !document.fonts.load) return Promise.resolve();
+    return Promise.all(['400', '600', '700', '800'].map(function (w) { return document.fonts.load(w + ' 16px WNunito').catch(function () {}); }))
+      .then(function () {}, function () {});
+  }
+  // Build the document, then save it as PDF or JPEG. `button` shows progress.
+  function exportDoc(makeDoc, baseName, kind, button) {
+    var label = button ? button.innerHTML : '';
+    if (button) { button.disabled = true; button.textContent = 'Preparing…'; }
+    return fontsReady().then(function () {
+      var doc = makeDoc();
+      if (kind === 'pdf') {
+        var canvases = doc.pageCanvases();
+        return Promise.all(canvases.map(function (cv) {
+          return toJpeg(cv).then(function (b) { return b.arrayBuffer(); }).then(function (buf) { return { bytes: new Uint8Array(buf), w: cv.width, h: cv.height }; });
+        })).then(function (imgs) { saveFile(makePdf(imgs), baseName + '.pdf'); });
+      }
+      var list = doc.longCanvases();
+      return list.reduce(function (chain, cv, i) {
+        return chain.then(function () { return toJpeg(cv); }).then(function (b) {
+          saveFile(b, baseName + (list.length > 1 ? '_page' + (i + 1) : '') + '.jpg');
+        });
+      }, Promise.resolve());
+    }).catch(function (err) {
+      alert('Could not make the file: ' + ((err && err.message) || err));
+    }).then(function () {
+      if (button) { button.disabled = false; button.innerHTML = label; }
+    });
+  }
+  function stationFileName(st, a, extra) {
+    return 'AutoWx_' + fileSafe(st.siteId) + '_' + fileSafe(st.label) + '_' + (extra ? fileSafe(extra) + '_' : '') + 'maintenance_' + fileStamp(a.to);
+  }
+  function exportStation(id, kind, button) {
+    var st = stationById(id), a = st && maintFor(st);
+    if (!a) return;
+    exportDoc(function () { return stationDoc(st, a); }, stationFileName(st, a), kind, button);
+  }
+  function exportInstrument(id, key, kind, button, view) {
+    var st = stationById(id), z = state.zoom;
+    var a = z && z.id === id && z.key === key ? z.a : st && maintFor(st);
+    if (!a) return;
+    view = view || (z && z.id === id && z.key === key ? { t0: z.t0, t1: z.t1 } : { t0: a.from, t1: a.to });
+    exportDoc(function () { return instrumentDoc(st, a, key, view); }, stationFileName(st, a, compOf(a, key).name), kind, button);
+  }
+
+  // All stations in the list: counts, one row per station, then details and actions for those with problems.
+  var SHORT = { comms: 'Tx', clock: 'Clk', power: 'Pwr', temp: 'Tmp', rh: 'RH', pressure: 'Prs', wind: 'Wnd', rain: 'Rn', solar: 'Sol' };
+  function networkDoc(list, desc) {
+    var doc = new Doc('AWS maintenance report');
+    var counts = { maintenance: 0, attention: 0, offline: 0, good: 0, pending: 0 };
+    list.forEach(function (r) { counts[r.a ? r.a.overall : 'pending']++; });
+    var scan = state.scan;
+    doc.header('Network maintenance report', 'Automatic weather stations', desc, null, '',
+      [scan && scan.finished ? 'Assessed ' + stamp(scan.finished) : 'Report made ' + stamp(Date.now()), QC.windowHours + '-hour data window']);
+    doc.stats([['Stations', String(list.length)], ['Maintenance', String(counts.maintenance)], ['Attention', String(counts.attention)],
+      ['Offline', String(counts.offline)], ['Good', String(counts.good)], ['Not assessed', String(counts.pending)]]);
+    var cols = [{ label: 'Station', w: 0.22, bold: true }, { label: 'ID', w: 0.06, muted: true }, { label: 'Status', w: 0.15 }]
+      .concat(COMPONENTS.map(function (c) { return { label: SHORT[c.key], w: 0.035, center: true }; }))
+      .concat([{ label: 'Main finding', w: 1 - 0.43 - 0.035 * COMPONENTS.length }]);
+    doc.table(cols, list.map(function (r) {
+      var a = r.a;
+      return [r.st.label, r.st.siteId, { pill: a ? a.overall : 'pending' }]
+        .concat(COMPONENTS.map(function (c, i) { return { dot: a ? a.components[i].result : 'na' }; }))
+        .concat([a ? (a.top ? a.top.text : 'No problems found') : 'Not assessed yet']);
+    }), { size: 10.5 });
+    doc.text('Tx data transmission · Clk logger clock · Pwr power supply · Tmp air temperature · RH relative humidity · Prs pressure · ' +
+      'Wnd wind · Rn rain gauge · Sol solar radiation.   Green OK · Yellow check · Red fault · Grey not assessed.', { size: 10, color: PAPER.muted, after: 10 });
+    var problem = list.filter(function (r) { return r.a && r.a.overall !== 'good'; });
+    if (problem.length) {
+      doc.text('Details and recommended actions', { weight: 800, size: 15, keepNext: true, after: 6 });
+      problem.forEach(function (r) {
+        var a = r.a;
+        doc.space(4).add({ h: 30, keepNext: true, draw: function (ctx, x, y) {
+          ctx.fillStyle = PAPER.text; ctx.font = dfont(14, 800); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+          var name = r.st.label + '  ·  ' + r.st.siteId;
+          ctx.fillText(name, x, y + 14);
+          measureCtx.font = dfont(14, 800);
+          pill(ctx, x + measureCtx.measureText(name).width + 12, y + 4, OVERALL[a.overall].label, a.overall, 10.5);
+        } });
+        var acts = [];
+        a.components.forEach(function (c) {
+          if (c.result !== 'check' && c.result !== 'fault') return;
+          c.findings.filter(function (f) { return f.result !== 'ok'; }).forEach(function (f) {
+            doc.text(c.name + ': ' + f.text, { indent: 18, bullet: RES_COLOR[f.result], size: 11.5 });
+          });
+          c.actions.forEach(function (x) { if (acts.indexOf(x) === -1) acts.push(x); });
+        });
+        if (acts.length) {
+          doc.text('Recommended action', { weight: 800, size: 11.5, keepNext: true, after: 1, indent: 18 });
+          acts.forEach(function (x) { doc.text(x, { indent: 34, bullet: '#2f6bff', size: 11 }); });
+        }
+      });
+    }
+    doc.space(8).text('Checks follow WMO practice for automatic weather station data (WMO-No. 8 and the WMO guidelines on quality control of AWS data). ' +
+      'Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment. ' +
+      'Open a station in AutoWx for its full report with charts.', { size: 10.5, color: PAPER.muted });
+    return doc;
+  }
+  function exportNetwork(kind, button) {
+    var v = maintRows();
+    var desc = (state.scope === 'selected' ? 'Selected stations' : 'All stations') +
+      (state.maint.filter !== 'all' ? ' · ' + OVERALL[state.maint.filter].label : '') +
+      (state.maint.query.trim() ? ' · matching “' + state.maint.query.trim() + '”' : '') + ' · ' + v.shown.length + ' station' + (v.shown.length === 1 ? '' : 's');
+    exportDoc(function () { return networkDoc(v.shown, desc); }, 'AutoWx_maintenance_' + (state.scope === 'selected' ? 'selected' : 'all') +
+      (state.maint.filter !== 'all' ? '_' + state.maint.filter : '') + '_' + fileStamp(Date.now()), kind, button);
   }
 
   // ---------- render: page ----------
@@ -2037,7 +2971,42 @@
     '.checklist li{display:flex;gap:10px;align-items:flex-start;margin:6px 0}',
     '.box{width:15px;height:15px;border:2px solid var(--glass-line);border-radius:4px;flex:none;margin-top:2px}',
     '.small{font-size:13px}',
-    '@media print{.top,.report-bar,.no-print{display:none!important}body{background:#fff!important}',
+    // Maintenance downloads and the instrument zoom view
+    '.btn:disabled{opacity:.55;cursor:default}.btn.sm{padding:4px 10px;font-size:12.5px;border-radius:8px}.btn.sm .ic{width:15px;height:15px}',
+    '.icon-btn:disabled{opacity:.4;cursor:default}.icon-btn.flip .ic{transform:scaleX(-1)}',
+    '.rb-r{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}',
+    '.dl-bar{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 14px;margin-bottom:12px}',
+    '.dl-l{display:flex;align-items:center;gap:8px}.dl-l .ic{color:var(--brand)}.dl-b{display:flex;gap:8px}.dl-n{color:var(--muted);font-size:12.5px;margin-left:auto}',
+    '.zoomable{cursor:zoom-in;border-radius:8px}.zoomable:hover{background:var(--panel)}',
+    '.mtools{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}',
+    '.mt-dl{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted)}.mt-dl .ic{width:15px;height:15px}',
+    '#wn-zoom{position:fixed;inset:0;z-index:11;background:rgba(10,18,35,.5);overflow:auto;padding:3vh 16px}#wn-zoom[hidden]{display:none}',
+    '.zsheet{background:var(--card);border-radius:18px;padding:18px 20px 20px;max-width:1180px;margin:0 auto;box-shadow:var(--shadow)}',
+    '.zh{display:flex;gap:12px;align-items:flex-start}.zh .tile-ic{margin-top:4px}.zh-t{flex:1;min-width:0}',
+    '.zh h2{margin:2px 0;font-size:21px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.zh .sub{color:var(--muted);font-size:13px}',
+    '.zh-b{display:flex;gap:8px;align-items:center}',
+    '.zbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 8px}',
+    '.segs{display:flex;gap:2px;background:var(--glass);padding:3px;border-radius:10px}',
+    '.seg{border:0;background:none;padding:5px 11px;border-radius:8px;font-weight:700;cursor:pointer;color:var(--muted)}',
+    '.seg.on{background:var(--card);color:var(--text);box-shadow:var(--shadow)}',
+    '.zrange{font-weight:700;font-size:13.5px}.zhint{color:var(--muted);font-size:12.5px;margin-left:auto}',
+    '.zchart{border:1px solid var(--line);border-radius:12px;overflow:hidden}.zchart canvas{display:block;touch-action:pan-y;cursor:crosshair}',
+    '.zlegend{display:flex;gap:6px 16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:8px 2px}',
+    '.zlegend span{display:inline-flex;align-items:center;gap:6px}.zlegend i{width:14px;height:4px;border-radius:2px;display:inline-block}',
+    '.zlegend i.sq{width:12px;height:12px;border-radius:3px}.zlegend i.gap{background:rgba(138,150,168,.35)}.zlegend i.flagband{background:rgba(229,72,77,.3)}',
+    '.zlegend i.night{background:rgba(91,107,140,.25)}.zlegend i.ring{width:11px;height:11px;border-radius:50%;border:2px solid ' + C.red + ';background:none}',
+    '.zstats{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin:10px 0 14px}',
+    '.zst{background:var(--panel);border-radius:10px;padding:8px 12px}.zst span{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}',
+    '.zst b{font-size:16px}',
+    '.zgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:16px;align-items:start}',
+    '.ztable{border:1px solid var(--line);border-radius:12px;overflow:hidden}.ztable-h{font-weight:800;padding:8px 12px;background:var(--panel);font-size:13px}',
+    '.ztable-s{max-height:340px;overflow:auto}.ztab{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}',
+    '.ztab th{position:sticky;top:0;background:var(--card);text-align:left;padding:6px 10px;color:var(--muted);font-size:11px;border-bottom:1px solid var(--line)}',
+    '.ztab td{padding:5px 10px;border-bottom:1px solid var(--line);white-space:nowrap}.ztab td.zf{white-space:normal;font-weight:700}',
+    '.ztab tr.check td{background:var(--warn-bg)}.ztab tr.fault td{background:var(--danger-bg)}.ztab tr.check td.zf{color:var(--warn)}.ztab tr.fault td.zf{color:var(--danger)}',
+    '@media (max-width:820px){.zgrid{grid-template-columns:1fr}.zhint{display:none}.dl-n{margin-left:0}}',
+    '@media (max-width:600px){.zh{flex-wrap:wrap}.zh-t{flex:1 1 calc(100% - 60px)}.zh-b{width:100%}.zh-b .icon-btn{margin-left:auto}#wn-zoom{padding:8px}.zsheet{padding:14px}}',
+    '@media print{.top,.report-bar,.no-print,#wn-zoom{display:none!important}body{background:#fff!important}',
     'main{padding:0!important;max-width:none}.card{box-shadow:none!important;border:0!important;padding:0!important}',
     '.mcomp{break-inside:avoid}.routine{break-inside:avoid}}',
     // Narrow screens
@@ -2060,7 +3029,7 @@
     '<button class="btn primary" data-act="pick">' + icon('plus') + 'Stations<span id="wn-pick-n"></span></button>' +
     '<button class="icon-btn" data-act="refresh" title="Update now" aria-label="Update now">' + icon('refresh') + '</button>' +
     '<a class="icon-btn" href="/admin/aws" title="Back to the collection system" aria-label="Back to the collection system">' + icon('exit') + '</a></div></div>' +
-    '<main id="wn-main"></main><div id="wn-picker" hidden></div>';
+    '<main id="wn-main"></main><div id="wn-picker" hidden></div><div id="wn-zoom" hidden></div>';
 
   document.head.innerHTML = '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>AutoWx</title>' +
@@ -2076,7 +3045,7 @@
     var t = e.target;
     var el;
     if ((el = t.closest('[data-view]'))) {
-      state.view = el.getAttribute('data-view'); state.maint.open = null; save(); render(); return;
+      state.view = el.getAttribute('data-view'); state.maint.open = null; closeZoom(); save(); render(); return;
     }
     if ((el = t.closest('[data-act]'))) {
       var act = el.getAttribute('data-act');
@@ -2087,11 +3056,27 @@
       else if (act === 'maint-scan') scanAll();
       else if (act === 'save-group') { var nm = document.getElementById('wn-group-name'); if (saveGroup(nm && nm.value)) render(); }
       else if (act === 'maint-stop') { if (state.scan) state.scan.running = false; render(); }
-      else if (act === 'maint-back') { state.maint.open = null; render(); window.scrollTo(0, 0); }
+      else if (act === 'maint-back') { state.maint.open = null; closeZoom(); render(); window.scrollTo(0, 0); }
+      else if (act === 'rep-pdf' || act === 'rep-jpeg') exportStation(state.maint.open, act === 'rep-pdf' ? 'pdf' : 'jpeg', el);
+      else if (act === 'net-pdf' || act === 'net-jpeg') exportNetwork(act === 'net-pdf' ? 'pdf' : 'jpeg', el);
+      else if (act === 'zoom-close') closeZoom();
+      else if ((act === 'zoom-pdf' || act === 'zoom-jpeg') && state.zoom) exportInstrument(state.zoom.id, state.zoom.key, act === 'zoom-pdf' ? 'pdf' : 'jpeg', el);
       else if (act === 'maint-print') window.print();
       else if (act === 'fit') { state.fit = !state.fit; state.view = 'weather'; save(); render(); window.scrollTo(0, 0); }
       return;
     }
+    if ((el = t.closest('[data-zoom]'))) { openZoom(state.maint.open, el.getAttribute('data-zoom')); return; }
+    if ((el = t.closest('[data-ipdf]'))) { exportInstrument(state.maint.open, el.getAttribute('data-ipdf'), 'pdf', el); return; }
+    if ((el = t.closest('[data-ijpeg]'))) { exportInstrument(state.maint.open, el.getAttribute('data-ijpeg'), 'jpeg', el); return; }
+    if ((el = t.closest('[data-zrange]')) && state.zoom) {
+      var za = state.zoom.a, zh = +el.getAttribute('data-zrange') * HOUR;
+      setZoomRange(za.to - zh, za.to); return;
+    }
+    if ((el = t.closest('[data-zpan]')) && state.zoom) {
+      var zs = state.zoom.t1 - state.zoom.t0, zd = +el.getAttribute('data-zpan') * zs / 2;
+      setZoomRange(state.zoom.t0 + zd, state.zoom.t1 + zd); return;
+    }
+    if (t.id === 'wn-zoom') { closeZoom(); return; }
     if ((el = t.closest('[data-group-load]'))) { loadGroup(el.getAttribute('data-group-load')); render(); loadShown(); return; }
     if ((el = t.closest('[data-group-del]'))) { deleteGroup(el.getAttribute('data-group-del')); render(); return; }
     if ((el = t.closest('[data-scope]'))) { state.scope = el.getAttribute('data-scope'); save(); render(); return; }
@@ -2157,6 +3142,7 @@
   });
 
   document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && state.zoom) { closeZoom(); return; }
     if (e.key === 'Escape' && state.picker) { state.picker = false; render(); loadShown(); }
     if (e.key === 'Enter' && e.target.id === 'wn-group-name') { if (saveGroup(e.target.value)) render(); }
   });
@@ -2165,7 +3151,7 @@
   var resizeTimer;
   window.addEventListener('resize', function () {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function () { if (state.fit) render(); }, 150);
+    resizeTimer = setTimeout(function () { if (state.fit) render(); if (state.zoom) drawZoom(); }, 150);
   });
 
   // Keep "updated … ago" fresh between refreshes.
