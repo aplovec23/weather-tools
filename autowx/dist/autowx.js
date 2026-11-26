@@ -742,6 +742,7 @@
     signal: '<path d="M5 18v-2M9.5 18v-5M14 18V9M18.5 18V5"/>',
     back: '<path d="M15 18l-6-6 6-6"/>',
     download: '<path d="M12 4v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19h14"/>',
+    calendar: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>',
     zoom: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/><path d="M11 8.5v5M8.5 11h5"/>',
     print: '<path d="M7 9V4h10v5"/><rect x="4" y="9" width="16" height="8" rx="2"/><path d="M7 14h10v6H7z"/>',
     grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/>' +
@@ -1769,6 +1770,13 @@
       '<span class="dl-b"><button class="btn" data-act="net-pdf"' + (shown.length ? '' : ' disabled') + '>PDF</button>' +
       '<button class="btn" data-act="net-jpeg"' + (shown.length ? '' : ' disabled') + '>JPEG</button></span>' +
       '<span class="dl-n">For one station or one instrument, open the station below.</span></div>' +
+      '<div class="month-bar"><span class="dl-l">' + icon('calendar') + '<span><b>Monthly report</b> · ' +
+      (currentGroup() ? 'group “' + esc(currentGroup().name) + '”, ' : state.scope === 'selected' ? 'selected stations, ' : 'all stations, ') +
+      counts.all + ' station' + (counts.all === 1 ? '' : 's') + '</span></span>' +
+      '<input type="month" id="wn-month" value="' + (state.maint.month || dateOf(Date.now()).slice(0, 7)) + '" max="' + dateOf(Date.now()).slice(0, 7) + '" aria-label="Month">' +
+      '<button class="btn sm" data-act="gmonth-pdf"' + (counts.all ? '' : ' disabled') + '>' + icon('download') + 'PDF</button>' +
+      '<button class="btn sm" data-act="gmonth-jpeg"' + (counts.all ? '' : ' disabled') + '>' + icon('download') + 'JPEG</button>' +
+      '<span class="dl-n">Choose a group or Selected above to report on just those stations.</span></div>' +
       '<div class="table-wrap"><table class="mtable"><thead>' + head + '</thead><tbody>' +
       (body || '<tr><td colspan="12" class="muted center">No stations match.</td></tr>') + '</tbody></table></div>' +
       '<p class="fine">' + WMO_NOTE + '</p></div>';
@@ -1845,6 +1853,10 @@
       '<button class="btn" data-act="rep-pdf">' + icon('download') + 'PDF</button>' +
       '<button class="btn" data-act="rep-jpeg">' + icon('download') + 'JPEG</button>' +
       '<button class="btn" data-act="maint-print">' + icon('print') + 'Print</button></div></div>' +
+      '<div class="month-bar no-print"><span class="dl-l">' + icon('calendar') + '<b>Monthly report</b></span>' +
+      '<input type="month" id="wn-month" value="' + (state.maint.month || dateOf(Date.now()).slice(0, 7)) + '" max="' + dateOf(Date.now()).slice(0, 7) + '" aria-label="Month">' +
+      '<button class="btn sm" data-act="month-pdf">' + icon('download') + 'PDF</button><button class="btn sm" data-act="month-jpeg">' + icon('download') + 'JPEG</button>' +
+      '<span class="dl-n">Loads the whole month from cserv and checks each day; it takes a little longer.</span></div>' +
       '<article class="card">' +
       '<header class="rep-h"><div><div class="tagline">Station maintenance report</div><h2>' + esc(st.label) + '</h2>' +
       '<div class="sub">Station ' + esc(st.siteId) + (st.lat != null ? ' · approx. ' + st.lat.toFixed(3) + '°N, ' + st.lon.toFixed(3) + '°E' : '') + '</div></div>' +
@@ -1933,23 +1945,23 @@
     var spec = { key: key, comp: c, from: a.from, to: a.to, panels: [], shade: [], gaps: gapsOf(rows, a.from, a.to), marks: c.marks || [], cols: [], cells: null };
     function line(k, name, color) { return { name: name, unit: UNIT[k], color: color, pts: rawPts(rows, k), type: 'line' }; }
     if (key === 'comms') {
-      var per = [];
-      for (var t = a.from; t < a.to; t += HOUR) {
+      var per = [], bucket = a.daily ? 24 * HOUR : HOUR, want = Math.round(bucket / TEN_MIN);
+      for (var t = a.from; t < a.to; t += bucket) {
         var n = 0, seen = {};
-        rows.forEach(function (r) { if (r.t > t && r.t <= t + HOUR && !seen[r.t]) { seen[r.t] = 1; n++; } });
-        per.push({ t: t + HOUR, v: n });
+        rows.forEach(function (r) { if (r.t > t && r.t <= t + bucket && !seen[r.t]) { seen[r.t] = 1; n++; } });
+        per.push({ t: t + bucket, v: n });
       }
-      spec.panels.push({ label: 'Records received per hour', unit: 'records', fixed: [0, QC.slotsPerHour + 1],
-        series: [{ name: 'Records', unit: 'per hour', color: C.blue, pts: per, type: 'bar', barMs: HOUR }],
-        lines: [{ v: QC.slotsPerHour, color: C.green, label: 'Expected ' + QC.slotsPerHour }] });
+      spec.panels.push({ label: 'Records received per ' + (a.daily ? 'day' : 'hour'), unit: 'records', fixed: [0, Math.ceil(want * 1.15)],
+        series: [{ name: 'Records', unit: a.daily ? 'per day' : 'per hour', color: C.blue, pts: per, type: 'bar', barMs: bucket }],
+        lines: [{ v: want, color: C.green, label: 'Expected ' + want }] });
       spec.cols = ['Hour ending', 'Records', 'Missing'];
       spec.cells = function (t0, t1) {
-        return per.filter(function (p) { return p.t > t0 && p.t - HOUR < t1; }).map(function (p) {
-          var miss = Math.max(0, QC.slotsPerHour - p.v);
+        return per.filter(function (p) { return p.t > t0 && p.t - bucket < t1; }).map(function (p) {
+          var miss = Math.max(0, want - p.v);
           return { t: p.t, cells: [clock(p.t), String(p.v), miss ? String(miss) : '—'], flag: miss ? (p.v ? 'Some records missing' : 'No records') : '', result: miss ? (p.v ? 'check' : 'fault') : '' };
         });
       };
-      spec.mainSeries = per;
+      spec.mainSeries = per; spec.bucket = bucket;
     } else if (key === 'clock') {
       var off = rows.map(function (r) { var m = (r.t / 60000) % 10; return { t: r.t, v: round(m > 5 ? m - 10 : m, 2) }; });
       spec.panels.push({ label: 'Minutes off the 10-minute schedule', unit: 'min', fixed: [-5, 5],
@@ -2006,6 +2018,29 @@
       spec.mainSeries = P.s[0].pts;
       spec.unit = P.unit;
     }
+    // Long periods: one row per day (the day's figures and that day's check result).
+    spec.dailyRows = function (t0, t1) {
+      var mainKey = { power: 'battery', temp: 'temp', rh: 'rh', pressure: 'pressure', wind: 'wind', rain: 'rain', solar: 'solar' }[key];
+      return (a.daily || []).filter(function (d) { return d.to > t0 && d.from < t1; }).map(function (d) {
+        var dc = compOf(d.a, key), dr = d.a.rows, cells;
+        var vals = mainKey ? dr.map(function (r) { return r.raw ? r.raw[mainKey] : null; }).filter(function (v) { return v != null && CONFIG.sentinels.indexOf(v) === -1; }) : [];
+        var label = dayLabel(d.from);
+        if (key === 'comms') cells = [label, String(dr.length), String(Math.max(0, d.a.expected - dr.length))];
+        else if (key === 'clock') cells = [label, String(dr.length), String(dr.filter(function (r) { return Math.round(r.t / 60000) % 10 !== 0; }).length)];
+        else if (key === 'rain') cells = [label, vals.length ? fmt(vals.reduce(function (x, v) { return x + v; }, 0)) : '—', vals.length ? fmt(Math.max.apply(null, vals)) : '—', String(dr.length)];
+        else cells = [label, vals.length ? fmt(Math.min.apply(null, vals)) : '—', vals.length ? fmt(Math.max.apply(null, vals)) : '—',
+          vals.length ? fmt(vals.reduce(function (x, v) { return x + v; }, 0) / vals.length) : '—', String(dr.length)];
+        var bad = dc.result === 'check' || dc.result === 'fault';
+        return { t: d.from, cells: cells, result: bad ? dc.result : '', flag: RESULT[dc.result].label + (bad ? ': ' + mainFinding(dc) : ''), day: dateOf(d.from) };
+      }).reverse();
+    };
+    spec.dailyCols = key === 'comms' ? ['Day', 'Records', 'Missing'] : key === 'clock' ? ['Day', 'Records', 'Off schedule'] :
+      key === 'rain' ? ['Day', 'Total (mm)', 'Max 10-min', 'Records'] : ['Day', 'Min', 'Max', 'Average', 'Records'];
+    // Rows and columns for a time range: every reading, or one row per day for long periods.
+    spec.table = function (t0, t1) {
+      if (a.daily && t1 - t0 > 50 * HOUR) return { daily: true, cols: spec.dailyCols, rows: spec.dailyRows(t0, t1) };
+      return { daily: false, cols: spec.cols, rows: spec.rowsIn(t0, t1) };
+    };
     // Flag text and result for each table row.
     var base = spec.cells;
     spec.rowsIn = function (t0, t1) {
@@ -2029,6 +2064,7 @@
     var flagged = spec.marks.filter(function (m) { return (m.to == null ? m.from : m.to) >= t0 && m.from <= t1; }).length;
     var expected = Math.max(1, Math.round((t1 - t0) / TEN_MIN));
     var recs = spec.key === 'comms' ? vals.reduce(function (s, v) { return s + v; }, 0) : pts.length;
+    if (spec.key === 'comms' && spec.bucket > HOUR) expected = Math.max(1, Math.round((t1 - t0) / TEN_MIN));
     var out = [];
     if (spec.key === 'comms') {
       out.push(['Records', recs + ' of ' + expected], ['Missing', String(Math.max(0, expected - recs))]);
@@ -2052,7 +2088,7 @@
     var raw = span / Math.max(1, n), p = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10)), f = raw / p;
     return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * p;
   }
-  var TIME_STEPS = [10, 20, 30, 60, 120, 180, 360, 720, 1440].map(function (m) { return m * 60000; });
+  var TIME_STEPS = [10, 20, 30, 60, 120, 180, 360, 720, 1440, 2880, 4320, 10080].map(function (m) { return m * 60000; });
   function timeTick(ms) {
     var d = phtDate(ms), h = d.getUTCHours(), m = d.getUTCMinutes();
     if (!h && !m) return MONTH_SHORT[d.getUTCMonth()] + ' ' + d.getUTCDate();
@@ -2147,7 +2183,25 @@
             if (q.v > 0) ctx.fillRect(xa + 0.5, Math.min(y, yz), bw, Math.max(1, Math.abs(yz - y)));
           });
         } else if (s.type === 'dot') {
-          pts.forEach(function (q) { ctx.beginPath(); ctx.arc(X(q.t), Y(q.v), 2.6, 0, 7); ctx.fill(); });
+          var dr = pts.length > (w - L - R) ? 1.3 : 2.6;
+          pts.forEach(function (q) { ctx.beginPath(); ctx.arc(X(q.t), Y(q.v), dr, 0, 7); ctx.fill(); });
+        } else if (pts.length > (w - L - R) * 1.2) {
+          // Long periods (week, month): per 2-pixel column, a band from lowest to highest reading plus the average line.
+          if (si > 0) return;   // extra lines (e.g. temperature min/max) are already inside the band
+          var cols = {}, order = [];
+          pts.forEach(function (q) {
+            var k = Math.floor(X(q.t) / 2);
+            var b = cols[k] || (cols[k] = (order.push(k), { lo: q.v, hi: q.v, sum: 0, n: 0, t: q.t }));
+            b.lo = Math.min(b.lo, q.v); b.hi = Math.max(b.hi, q.v); b.sum += q.v; b.n++; b.t = q.t;
+          });
+          ctx.globalAlpha = 0.28;
+          order.forEach(function (k) { var b = cols[k]; ctx.fillRect(k * 2, Y(b.hi), 2, Math.max(1, Y(b.lo) - Y(b.hi))); });
+          ctx.globalAlpha = 1; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.beginPath();
+          order.forEach(function (k, i) {
+            var b = cols[k], brk = !i || b.t - cols[order[i - 1]].t > Math.max(2 * TEN_MIN, 3 * span / (w - L - R));
+            if (brk) ctx.moveTo(k * 2 + 1, Y(b.sum / b.n)); else ctx.lineTo(k * 2 + 1, Y(b.sum / b.n));
+          });
+          ctx.stroke();
         } else {
           ctx.lineWidth = si === 0 ? 2.2 : 1.4; ctx.lineJoin = 'round';
           ctx.beginPath();
@@ -2160,7 +2214,7 @@
         }
       });
       // flagged single readings: ring around the reading
-      if (pi === 0 || spec.key === 'wind') {
+      if ((pi === 0 || spec.key === 'wind') && span <= 50 * HOUR) {   // long periods: the day squares show flagged days instead
         var main = p.series[0].pts;
         spec.marks.forEach(function (m) {
           if (m.to != null || m.from < t0 || m.from > t1) return;
@@ -2168,8 +2222,8 @@
           var q = null;
           main.forEach(function (x) { if (Math.abs(x.t - m.from) < 30000) q = x; });
           var y = q ? Y(Math.min(hi, Math.max(lo, q.v))) : y1 - 6;
-          ctx.strokeStyle = RES_COLOR[m.result]; ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.arc(X(m.from), y, 5.5, 0, 7); ctx.stroke();
+          ctx.strokeStyle = RES_COLOR[m.result]; ctx.lineWidth = span > 3 * 24 * HOUR ? 1.4 : 2;
+          ctx.beginPath(); ctx.arc(X(m.from), y, span > 3 * 24 * HOUR ? 3 : 5.5, 0, 7); ctx.stroke();
         });
       }
       ctx.restore();
@@ -2188,7 +2242,8 @@
       geo.forEach(function (g) {
         g.p.series.forEach(function (s) {
           var best = null;
-          s.pts.forEach(function (q) { if (Math.abs(q.t - hover) <= (s.barMs || TEN_MIN) / 2 && (!best || Math.abs(q.t - hover) < Math.abs(best.t - hover))) best = q; });
+          var tol = Math.max((s.barMs || TEN_MIN) / 2, 3 * span / (w - L - R));
+          s.pts.forEach(function (q) { if (Math.abs(q.t - hover) <= tol && (!best || Math.abs(q.t - hover) < Math.abs(best.t - hover))) best = q; });
           if (best) {
             lines.push(s.name + ': ' + (s.name === 'Direction' ? Math.round(best.v) + '° ' + compassPoint(best.v) : fmt(best.v, Math.abs(best.v) < 20 ? 2 : 1) + ' ' + (s.unit || '')));
             ctx.fillStyle = s.color; ctx.beginPath(); ctx.arc(X(best.t), g.Y(Math.min(g.hi, Math.max(g.lo, best.v))), 4.5, 0, 7); ctx.fill();
@@ -2239,18 +2294,52 @@
   function closeZoom() { state.zoom = null; var z = document.getElementById('wn-zoom'); z.hidden = true; z.innerHTML = ''; }
   function dayStart(date) { var p = date.split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]) - 8 * HOUR; }   // 12 AM PHT
   function dateOf(ms) { var d = phtDate(ms); return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()); }
-  // Load and assess an earlier period: `days` calendar days ending on `date` (YYYY-MM-DD, Philippine time).
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  function dayLabel(ms) { var d = phtDate(ms); return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MONTH_SHORT[d.getUTCMonth()]; }
+  function monthName(ym) { var p = ym.split('-'); return MONTHS[+p[1] - 1] + ' ' + p[0]; }
+  // A period: `days` calendar days ending on `date`, or days = 'month' for the whole month of `date` (Philippine time).
+  function periodRange(date, days) {
+    var p = date.split('-'), from, end;
+    if (days === 'month') { from = Date.UTC(+p[0], +p[1] - 1, 1) - 8 * HOUR; end = Date.UTC(+p[0], +p[1], 1) - 8 * HOUR; }
+    else { end = dayStart(date) + 24 * HOUR; from = end - days * 24 * HOUR; }
+    return { from: from, to: Math.min(end, Date.now()) };
+  }
+  // Records for a long period, a week at a time so each request stays small.
+  function fetchRange(id, from, to) {
+    var all = [], chunks = [];
+    for (var t = from; t < to; t += 7 * 24 * HOUR) chunks.push([t, Math.min(to, t + 7 * 24 * HOUR)]);
+    return chunks.reduce(function (chain, c, i) {
+      return chain.then(function () {
+        return fetchHistory(id, c[0], c[1]).then(function (rows) {
+          all = all.concat(rows.filter(function (r) { return r.t >= c[0] && (r.t < c[1] || i === chunks.length - 1); }));
+        });
+      });
+    }, Promise.resolve()).then(function () { return all.sort(function (a, b) { return a.t - b.t; }); });
+  }
+  // The same checks, run separately for each day of a long period.
+  function dailyAssess(st, rows, from, to) {
+    var out = [];
+    for (var d = from; d < to; d += 24 * HOUR) {
+      var e = Math.min(to, d + 24 * HOUR);
+      var sub = rows.filter(function (r) { return r.t > d - TEN_MIN && r.t <= e; });
+      out.push({ from: d, to: e, a: assessStation(st, sub, { from: d, to: e }) });
+    }
+    return out;
+  }
+  // Load and assess an earlier period (see periodRange).
   function loadZoomPeriod(date, days) {
     var z = state.zoom;
     if (!z || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-    var end = dayStart(date) + 24 * HOUR, from = end - days * 24 * HOUR, to = Math.min(end, Date.now());
+    var pr = periodRange(date, days), from = pr.from, to = pr.to;
     if (from >= to) return;
     var ticket = z.ticket = (z.ticket || 0) + 1;
     z.period = { date: date, days: days }; z.loading = true; z.error = null;
     renderZoom();
-    fetchHistory(z.id, from, to).then(function (rows) {
+    fetchRange(z.id, from, to).then(function (rows) {
       if (state.zoom !== z || z.ticket !== ticket) return;
-      z.a = assessStation(stationById(z.id), rows, { from: from, to: to });
+      var st = stationById(z.id);
+      z.a = assessStation(st, rows, { from: from, to: to });
+      if (to - from > 50 * HOUR) z.a.daily = dailyAssess(st, rows, from, to);
       z.t0 = from; z.t1 = to; z.loading = false; z.hover = null;
       renderZoom();
     }).catch(function (err) {
@@ -2266,11 +2355,12 @@
     z.ticket = (z.ticket || 0) + 1; z.period = null; z.error = null; z.loading = false;
     z.a = a; z.t0 = a.from; z.t1 = a.to; renderZoom();
   }
-  function zoomStepDay(dir) {
-    var z = state.zoom, cur = z.period ? z.period.date : dateOf(Date.now());
-    var next = dateOf(dayStart(cur) + dir * 24 * HOUR + HOUR);
+  function zoomStepDay(dir) {   // a day back/forward, or a month in month view
+    var z = state.zoom, cur = z.period ? z.period.date : dateOf(Date.now()), days = z.period ? z.period.days : 1, next;
+    if (days === 'month') { var p = cur.split('-'); next = dateOf(Date.UTC(+p[0], +p[1] - 1 + dir, 1) - 8 * HOUR + HOUR); }
+    else next = dateOf(dayStart(cur) + dir * 24 * HOUR + HOUR);
     if (dayStart(next) > Date.now()) return;
-    loadZoomPeriod(next, z.period ? z.period.days : 1);
+    loadZoomPeriod(next, days);
   }
   function setZoomRange(t0, t1) {
     var z = state.zoom, a = z.a, span = Math.max(30 * 60000, t1 - t0);
@@ -2281,7 +2371,7 @@
     }
     renderZoom();
   }
-  function rangeLabel(t0, t1) { return stamp(t0) + ' – ' + (phtDate(t0).getUTCDate() === phtDate(t1).getUTCDate() ? clock(t1) : stamp(t1)); }
+  function rangeLabel(t0, t1) { return stamp(t0) + ' – ' + (dateOf(t0) === dateOf(t1) ? clock(t1) : stamp(t1)); }
 
   function renderZoom() {
     var z = state.zoom, box = document.getElementById('wn-zoom');
@@ -2289,30 +2379,42 @@
     var st = stationById(z.id), a = z.a, c = compOf(a, z.key), spec = z.spec = instrumentSpec(a, z.key);
     var full = z.t0 <= a.from && z.t1 >= a.to;
     var hrsShown = Math.round((z.t1 - z.t0) / HOUR * 10) / 10;
-    var long = a.to - a.from > 25 * HOUR;
-    var ranges = (long ? ['all', 24, 12, 6, 3] : [24, 12, 6, 3, 1]).map(function (n) {
+    var long = a.to - a.from > 25 * HOUR, nDays = Math.round((a.to - a.from) / 86400000);
+    var opts = long ? ['all'].concat(a.to - a.from > 8 * 24 * HOUR ? [168] : [], [24, 12, 6]) : [24, 12, 6, 3, 1];
+    var ranges = opts.map(function (n) {
       var on = n === 'all' ? full : Math.abs(hrsShown - n) < 0.05 && Math.abs(z.t1 - a.to) < 60000;
-      return '<button class="seg' + (on ? ' on' : '') + '" data-zrange="' + n + '">' + (n === 'all' ? 'All ' + Math.round((a.to - a.from) / 86400000) + ' days' : n + ' h') + '</button>';
+      return '<button class="seg' + (on ? ' on' : '') + '" data-zrange="' + n + '">' +
+        (n === 'all' ? 'All ' + nDays + ' days' : n >= 48 ? n / 24 + ' days' : n + ' h') + '</button>';
     }).join('');
     var today = dateOf(Date.now()), curDate = z.period ? z.period.date : today, curDays = z.period ? z.period.days : 1;
+    var cp = curDate.split('-'), nextStart = curDays === 'month' ? Date.UTC(+cp[0], +cp[1], 1) - 8 * HOUR : dayStart(curDate) + 24 * HOUR;
     var period = '<div class="zper"><span class="zper-l">' + icon('clock') + 'Period</span>' +
-      '<button class="icon-btn" data-zday="-1" title="Previous day" aria-label="Previous day">' + icon('back') + '</button>' +
+      '<button class="icon-btn" data-zday="-1" title="' + (curDays === 'month' ? 'Previous month' : 'Previous day') + '" aria-label="Earlier">' + icon('back') + '</button>' +
       '<input type="date" id="wn-zdate" value="' + curDate + '" max="' + today + '" aria-label="Day">' +
-      '<button class="icon-btn flip" data-zday="1" title="Next day" aria-label="Next day"' + (!z.period || curDate >= today ? ' disabled' : '') + '>' + icon('back') + '</button>' +
-      '<select id="wn-zdays" aria-label="Number of days">' + [1, 2, 3, 7].map(function (n) {
-        return '<option value="' + n + '"' + (n === curDays ? ' selected' : '') + '>' + (n === 1 ? '1 day' : n + ' days, ending that day') + '</option>';
+      '<button class="icon-btn flip" data-zday="1" title="' + (curDays === 'month' ? 'Next month' : 'Next day') + '" aria-label="Later"' +
+      (!z.period || nextStart > Date.now() ? ' disabled' : '') + '>' + icon('back') + '</button>' +
+      '<select id="wn-zdays" aria-label="Length of period">' + [1, 2, 3, 7, 'month'].map(function (n) {
+        return '<option value="' + n + '"' + (n === curDays ? ' selected' : '') + '>' +
+          (n === 1 ? '1 day' : n === 7 ? '1 week, ending that day' : n === 'month' ? 'Whole month' : n + ' days, ending that day') + '</option>';
       }).join('') + '</select>' +
       '<button class="btn sm' + (z.period ? '' : ' on') + '" data-act="zoom-latest">Latest 24 h</button>' +
       (z.loading ? '<span class="zload">Loading and checking…</span>' : '') +
       (z.error ? '<span class="zerr">' + esc(z.error) + '</span>' : '') +
-      '<span class="zper-n">' + (z.period ? 'Checked for ' + rangeLabel(a.from, a.to) : 'Showing the last 24 hours') + '</span></div>';
+      '<span class="zper-n">' + (z.period ? 'Checked for ' + (curDays === 'month' ? monthName(curDate.slice(0, 7)) + ' (' + rangeLabel(a.from, a.to) + ')' : rangeLabel(a.from, a.to))
+        : 'Showing the last 24 hours') + '</span></div>';
+    // Long periods: one square per day, coloured by that day's result; select a day to open it.
+    var strip = a.daily ? '<div class="zdays-w"><div class="zdays-h">Daily result for ' + esc(c.name.toLowerCase()) + ' · select a day to open it</div><div class="zdays">' +
+      a.daily.map(function (d) {
+        var r = compOf(d.a, z.key).result;
+        return '<button class="zday r-' + r + '" data-zjump="' + dateOf(d.from) + '" title="' + esc(dayLabel(d.from) + ': ' + RESULT[r].label) + '">' + phtDate(d.from).getUTCDate() + '</button>';
+      }).join('') + '</div></div>' : '';
     var stats = statsIn(spec, z.t0, z.t1).map(function (s) { return '<div class="zst"><span>' + s[0] + '</span><b>' + esc(s[1]) + '</b></div>'; }).join('');
-    var rows = spec.rowsIn(z.t0, z.t1);
-    var table = '<table class="ztab"><thead><tr>' + spec.cols.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '<th>Flag</th></tr></thead><tbody>' +
+    var tb = spec.table(z.t0, z.t1), rows = tb.rows;
+    var table = '<table class="ztab"><thead><tr>' + tb.cols.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '<th>' + (tb.daily ? 'Result' : 'Flag') + '</th></tr></thead><tbody>' +
       (rows.length ? rows.map(function (r) {
-        return '<tr class="' + (r.result || '') + '" data-zt="' + r.t + '">' + r.cells.map(function (x) { return '<td>' + esc(x) + '</td>'; }).join('') +
+        return '<tr class="' + (r.result || '') + (r.day ? ' zdrow' : '') + '"' + (r.day ? ' data-zjump="' + r.day + '"' : '') + '>' + r.cells.map(function (x) { return '<td>' + esc(x) + '</td>'; }).join('') +
           '<td class="zf">' + esc(r.flag || '') + '</td></tr>';
-      }).join('') : '<tr><td colspan="' + (spec.cols.length + 1) + '" class="muted center">No records in this period.</td></tr>') + '</tbody></table>';
+      }).join('') : '<tr><td colspan="' + (tb.cols.length + 1) + '" class="muted center">No records in this period.</td></tr>') + '</tbody></table>';
     box.innerHTML = '<div class="zsheet" role="dialog" aria-label="' + esc(c.name) + ' — zoom view">' +
       '<header class="zh"><span class="tile-ic" style="--c:' + RES_COLOR[c.result] + '">' + icon(c.icon) + '</span>' +
       '<div class="zh-t"><div class="tagline">Instrument view</div><h2>' + esc(c.name) + ' ' + resultPill(c.result) + '</h2>' +
@@ -2326,13 +2428,14 @@
       '<button class="icon-btn flip" data-zpan="1" title="Later" aria-label="Later"' + (z.t1 >= a.to ? ' disabled' : '') + '>' + icon('back') + '</button>' +
       '<span class="zrange">' + rangeLabel(z.t0, z.t1) + '</span>' +
       '<span class="zhint">Drag across the chart to zoom in' + (full ? '' : ' · double-click to show all') + '</span></div>' +
-      '<div class="zchart"><canvas id="wn-zcanvas"></canvas></div>' +
+      '<div class="zchart"><canvas id="wn-zcanvas"></canvas></div>' + strip +
       '<div class="zlegend">' + zoomLegend(spec) + '</div>' +
       '<div class="zstats">' + stats + '</div>' +
       '<div class="zgrid"><div class="zfind">' +
       (c.findings.length ? '<ul class="finds">' + c.findings.map(function (f) { return '<li class="' + f.result + '">' + esc(f.text) + '</li>'; }).join('') + '</ul>' : '<p class="muted small">No data to test.</p>') +
       (c.actions.length ? '<div class="acts"><b>Recommended action</b><ul>' + c.actions.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>' : '') +
-      '</div><div class="ztable"><div class="ztable-h">Readings (' + rows.length + ', newest first)</div><div class="ztable-s">' + table + '</div></div></div></div>';
+      '</div><div class="ztable"><div class="ztable-h">' + (tb.daily ? 'Daily summary (' + rows.length + ' days, newest first · select a day to open it)' :
+        'Readings (' + rows.length + ', newest first)') + '</div><div class="ztable-s">' + table + '</div></div></div></div>';
     box.hidden = false;
     drawZoom();
     bindZoomCanvas();
@@ -2346,7 +2449,8 @@
       var fault = spans.some(function (m) { return m.result === 'fault'; });
       items.push('<span><i class="sq" style="background:' + (fault ? 'rgba(229,72,77,.3)' : 'rgba(240,180,41,.4)') + '"></i>Flagged period</span>');
     }
-    if (spec.marks.some(function (m) { return m.to == null; })) items.push('<span><i class="ring"></i>Flagged reading</span>');
+    var z = state.zoom, shortView = !z || z.t1 - z.t0 <= 50 * HOUR;
+    if (shortView && spec.marks.some(function (m) { return m.to == null; })) items.push('<span><i class="ring"></i>Flagged reading</span>');
     if (spec.key === 'solar') items.push('<span><i class="sq night"></i>Night</span>');
     return items.join('');
   }
@@ -2541,6 +2645,28 @@
     return this.space(8);
   };
 
+  // One square per day for each row (instrument), coloured by that day's result.
+  var DAY_COL = { ok: '#3fb37f', check: '#f0b429', fault: '#e5484d', na: '#d5dbe3', offline: '#5b6b8c' };
+  var DAY_OF_OVERALL = { good: 'ok', attention: 'check', maintenance: 'fault', offline: 'offline', pending: 'na' };
+  Doc.prototype.dayGrid = function (days, rows, forceLabels) {
+    if (rows.length > 40) {   // too tall for one page: 40 rows at a time, each with the day numbers
+      for (var i = 0; i < rows.length; i += 40) this.dayGrid(days, rows.slice(i, i + 40), true);
+      return this;
+    }
+    var W = DOC.W - 2 * DOC.M, lw = rows.length > 1 || forceLabels ? 128 : 0, cw = (W - lw) / Math.max(1, days.length), rh = 19;
+    var h = 18 + rows.length * rh + 8;
+    return this.add({ h: h, draw: function (ctx, x, y) {
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'center'; ctx.font = dfont(9, 700); ctx.fillStyle = PAPER.muted;
+      days.forEach(function (d, i) { ctx.fillText(String(phtDate(d.from).getUTCDate()), x + lw + i * cw + cw / 2, y + 8); });
+      rows.forEach(function (r, ri) {
+        var yy = y + 18 + ri * rh;
+        if (lw) { ctx.textAlign = 'left'; ctx.fillStyle = PAPER.text; ctx.font = dfont(10.5, 700); ctx.fillText(r.label, x, yy + rh / 2); }
+        r.results.forEach(function (res, i) {
+          ctx.fillStyle = DAY_COL[res] || DAY_COL.na; roundRect(ctx, x + lw + i * cw + 1, yy + 2, Math.max(2, cw - 2), rh - 4, 3); ctx.fill();
+        });
+      });
+    } });
+  };
   // Splits blocks into pages; a table header is repeated at the top of a new page.
   Doc.prototype.paginate = function () {
     var top = DOC.M, bottom = DOC.H - DOC.M - 22 - noteHeight() - 6, pages = [[]], y = top, bl = this.blocks;
@@ -2668,21 +2794,201 @@
       ['Period ' + rangeLabel(view.t0, view.t1), 'Assessed ' + stamp(a.assessedAt || a.to)]);
     doc.stats(statsIn(spec, view.t0, view.t1));
     doc.chart(spec, view, spec.panels.length > 1 ? 400 : 300);
+    if (a.daily) {
+      doc.text('Daily result', { weight: 800, size: 12, keepNext: true, after: 2 });
+      doc.dayGrid(a.daily, [{ label: c.name, results: a.daily.map(function (d) { return compOf(d.a, key).result; }) }]);
+      doc.text('Green OK · Yellow check · Red fault · Grey no data to test.', { size: 9.5, color: PAPER.muted, after: 8 });
+    }
     doc.text('Findings (' + (a.live === false ? 'checks for ' + rangeLabel(a.from, a.to) : QC.windowHours + '-hour assessment') + ')',
       { weight: 800, size: 14, keepNext: true, after: 4 });
     addFindings(doc, c);
     addActions(doc, c);
     doc.imageEnd();
-    var rows = spec.rowsIn(view.t0, view.t1);
-    doc.space(8).text('Readings (' + rows.length + ', newest first)', { weight: 800, size: 14, keepNext: true, after: 6 });
-    var n = spec.cols.length;
-    var cols = spec.cols.map(function (h, i) { return { label: h, w: i === 0 ? 0.14 : (0.62 - 0.14) / Math.max(1, n - 1) }; });
-    cols.push({ label: 'Flag', w: 0.38 });
+    var tb = spec.table(view.t0, view.t1), rows = tb.rows;
+    doc.space(8).text(tb.daily ? 'Daily summary (' + rows.length + ' days, newest first)' : 'Readings (' + rows.length + ', newest first)',
+      { weight: 800, size: 14, keepNext: true, after: 6 });
+    var n = tb.cols.length, first = tb.daily ? 0.16 : 0.14;
+    var cols = tb.cols.map(function (h, i) { return { label: h, w: i === 0 ? first : (0.62 - first) / Math.max(1, n - 1) }; });
+    cols.push({ label: tb.daily ? 'Result' : 'Flag', w: 0.38 });
     doc.table(cols, rows.map(function (r) {
       return { cells: r.cells.concat([r.flag || '']), tint: r.result === 'fault' ? '#fdecec' : r.result === 'check' ? '#fff6e2' : null };
     }), { size: 10.5 });
     return doc;
   }
+  // Month: daily status grid for every instrument, monthly summary, problem days, monthly charts and actions.
+  function monthDoc(st, a, ym, image) {
+    var doc = new Doc(st.label + ' — monthly maintenance report, ' + monthName(ym));
+    var days = { good: 0, attention: 0, maintenance: 0, offline: 0 };
+    a.daily.forEach(function (d) { if (days[d.a.overall] != null) days[d.a.overall]++; });
+    var comms = compOf(a, 'comms');
+    doc.header('Monthly maintenance report', st.label + ' — ' + monthName(ym), stationSub(st), a.overall, OVERALL[a.overall].label,
+      ['Data ' + rangeLabel(a.from, a.to), 'Assessed ' + stamp(a.assessedAt)]);
+    doc.stats([['Days', String(a.daily.length)], ['Good days', String(days.good)], ['Attention', String(days.attention)],
+      ['Maintenance', String(days.maintenance)], ['Offline', String(days.offline)],
+      ['Data received', comms.metrics ? Math.round(comms.metrics.share * 100) + '%' : '0%']]);
+    doc.text('Daily status', { weight: 800, size: 15, keepNext: true, after: 4 });
+    doc.dayGrid(a.daily, a.components.map(function (c, i) { return { label: c.name, results: a.daily.map(function (d) { return d.a.components[i].result; }) }; }));
+    doc.text('Each square is one day, checked on its own. Green OK · Yellow check · Red fault · Grey no data to test.', { size: 10, color: PAPER.muted, after: 10 });
+    doc.text('Summary for the month', { weight: 800, size: 15, keepNext: true, after: 6 });
+    doc.table([{ label: 'Instrument', w: 0.22, bold: true }, { label: 'Month', w: 0.13 }, { label: 'OK days', w: 0.08 }, { label: 'Check', w: 0.07 },
+      { label: 'Fault', w: 0.07 }, { label: 'No data', w: 0.08 }, { label: 'Main finding for the month', w: 0.35 }],
+      a.components.map(function (c, i) {
+        var n = { ok: 0, check: 0, fault: 0, na: 0 };
+        a.daily.forEach(function (d) { n[d.a.components[i].result]++; });
+        return [c.name, { pill: c.result }, String(n.ok), String(n.check), String(n.fault), String(n.na), mainFinding(c)];
+      }), { size: 11 });
+    // Actions from the whole month and from each problem day, without repeats.
+    function actionsFor(c, i) {
+      var acts = c.actions.slice();
+      a.daily.forEach(function (d) { d.a.components[i].actions.forEach(function (x) { if (acts.indexOf(x) === -1) acts.push(x); }); });
+      return acts;
+    }
+    if (image) {
+      var all = [];
+      a.components.forEach(function (c, i) {
+        actionsFor(c, i).forEach(function (x) { if (!all.some(function (o) { return o.x === x; })) all.push({ c: c, x: x }); });
+      });
+      doc.space(4).text('Recommended action', { weight: 800, size: 15, keepNext: true, after: 6 });
+      if (!all.length) doc.text('None. Continue routine maintenance.', { indent: 18, bullet: RES_COLOR.ok });
+      all.forEach(function (o) { doc.text(o.c.name + ': ' + o.x, { indent: 18, bullet: RES_COLOR[o.c.result === 'ok' ? 'check' : o.c.result] }); });
+      return doc;
+    }
+    a.components.forEach(function (c, i) {
+      doc.space(6).section(c.name, c.result);
+      var bad = a.daily.filter(function (d) { var r = d.a.components[i].result; return r === 'check' || r === 'fault'; });
+      if (!bad.length) doc.text(a.rows.length ? 'No problems found on any day.' : 'No data to test.', { indent: 18, bullet: RES_COLOR.ok, keepNext: a.rows.length > 0 });
+      bad.slice(0, 8).forEach(function (d) {
+        var dc = d.a.components[i];
+        doc.text(dayLabel(d.from) + ' — ' + mainFinding(dc), { indent: 18, bullet: RES_COLOR[dc.result], size: 11.5, keepNext: true });
+      });
+      if (bad.length > 8) doc.text('…and ' + (bad.length - 8) + ' more day' + (bad.length - 8 > 1 ? 's' : '') + ' with problems.', { indent: 18, size: 11.5, color: PAPER.muted, keepNext: true });
+      if (a.rows.length) doc.chart(instrumentSpec(a, c.key), { t0: a.from, t1: a.to }, c.key === 'wind' || c.key === 'rain' ? 290 : 180);
+      addActions(doc, { actions: actionsFor(c, i) });
+    });
+    doc.space(8).text('Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment.', { size: 10.5, color: PAPER.muted });
+    return doc;
+  }
+  function exportMonthly(id, kind, button) {
+    var st = stationById(id), ym = state.maint.month || dateOf(Date.now()).slice(0, 7);
+    if (!st || !/^\d{4}-\d{2}$/.test(ym)) return;
+    var r = periodRange(ym + '-01', 'month');
+    if (r.from >= r.to) { alert('That month has not started yet.'); return; }
+    var label = button.innerHTML;
+    button.disabled = true; button.textContent = 'Loading ' + monthName(ym) + '…';
+    fetchRange(id, r.from, r.to).then(function (rows) {
+      button.disabled = false; button.innerHTML = label;
+      var a = assessStation(st, rows, r);
+      a.daily = dailyAssess(st, rows, r.from, r.to);
+      return exportDoc(function (k) { return monthDoc(st, a, ym, k === 'jpeg'); },
+        'AutoWx_' + fileSafe(st.siteId) + '_' + fileSafe(st.label) + '_monthly_maintenance_' + ym, kind, button);
+    }).catch(function (err) {
+      button.disabled = false; button.innerHTML = label;
+      alert(err instanceof SignedOut ? 'You have been signed out of cserv. Sign in again, then reopen AutoWx.' : 'Could not load that month: ' + ((err && err.message) || err));
+    });
+  }
+
+  // Month for several stations: each station's month result, a daily status grid (one row per station), details and actions.
+  function groupMonthDoc(list, ym, desc) {
+    var doc = new Doc('Monthly maintenance report — ' + desc + ', ' + monthName(ym));
+    var n = { good: 0, attention: 0, maintenance: 0, offline: 0 }, shareSum = 0;
+    list.forEach(function (x) {
+      n[x.a.overall]++;
+      var cm = compOf(x.a, 'comms');
+      shareSum += cm.metrics ? cm.metrics.share : 0;
+    });
+    doc.header('Monthly network maintenance report', monthName(ym), desc + ' · ' + list.length + ' station' + (list.length === 1 ? '' : 's'), null, '',
+      ['Data ' + (list[0] ? rangeLabel(list[0].a.from, list[0].a.to) : ''), 'Assessed ' + stamp(Date.now())]);
+    doc.stats([['Stations', String(list.length)], ['Good', String(n.good)], ['Attention', String(n.attention)], ['Maintenance', String(n.maintenance)],
+      ['Offline', String(n.offline)], ['Data received', list.length ? Math.round(shareSum / list.length * 100) + '%' : '—']]);
+    if (list[0]) {
+      doc.text('Daily status by station', { weight: 800, size: 15, keepNext: true, after: 4 });
+      doc.dayGrid(list[0].a.daily, list.map(function (x) {
+        return { label: x.st.label.length > 22 ? x.st.label.slice(0, 21) + '…' : x.st.label, results: x.a.daily.map(function (d) { return DAY_OF_OVERALL[d.a.overall]; }) };
+      }));
+      doc.text('Each square is one day for that station. Green good · Yellow needs attention · Red needs maintenance · Dark grey offline.', { size: 10, color: PAPER.muted, after: 10 });
+    }
+    doc.text('Station summary', { weight: 800, size: 15, keepNext: true, after: 6 });
+    var cols = [{ label: 'Station', w: 0.18, bold: true }, { label: 'ID', w: 0.05, muted: true }, { label: 'Month', w: 0.16 }, { label: 'Data', w: 0.06 },
+      { label: 'Bad days', w: 0.085 }]
+      .concat(COMPONENTS.map(function (c) { return { label: SHORT[c.key], w: 0.03, center: true }; }))
+      .concat([{ label: 'Main finding', w: 1 - 0.535 - 0.03 * COMPONENTS.length }]);
+    doc.table(cols, list.map(function (x) {
+      var cm = compOf(x.a, 'comms'), bad = x.a.daily.filter(function (d) { return d.a.overall !== 'good'; }).length;
+      return [x.st.label, x.st.siteId, { pill: x.a.overall }, cm.metrics ? Math.round(cm.metrics.share * 100) + '%' : '0%', bad + ' of ' + x.a.daily.length]
+        .concat(COMPONENTS.map(function (c, i) { return { dot: x.a.components[i].result }; }))
+        .concat([x.a.top ? x.a.top.text : 'No problems found']);
+    }), { size: 10.5 });
+    doc.text('Tx data transmission · Clk logger clock · Pwr power supply · Tmp air temperature · RH relative humidity · Prs pressure · ' +
+      'Wnd wind · Rn rain gauge · Sol solar radiation (result for the whole month).   Bad days = days not rated Good.', { size: 10, color: PAPER.muted, after: 10 });
+    var problem = list.filter(function (x) { return x.a.overall !== 'good'; });
+    if (problem.length) {
+      doc.text('Details and recommended actions', { weight: 800, size: 15, keepNext: true, after: 6 });
+      problem.forEach(function (x) {
+        var a = x.a;
+        doc.space(4).add({ h: 30, keepNext: true, draw: function (ctx, px, py) {
+          ctx.fillStyle = PAPER.text; ctx.font = dfont(14, 800); ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+          var name = x.st.label + '  ·  ' + x.st.siteId;
+          ctx.fillText(name, px, py + 14);
+          measureCtx.font = dfont(14, 800);
+          pill(ctx, px + measureCtx.measureText(name).width + 12, py + 4, OVERALL[a.overall].label, a.overall, 10.5);
+        } });
+        var acts = [];
+        a.components.forEach(function (c, i) {
+          var days = a.daily.filter(function (d) { var r = d.a.components[i].result; return r === 'check' || r === 'fault'; });
+          if (!days.length && c.result === 'ok') return;
+          if (!days.length && c.result === 'na') return;
+          var first = days.slice(0, 4).map(function (d) { return phtDate(d.from).getUTCDate(); }).join(', ') + (days.length > 4 ? '…' : '');
+          doc.text(c.name + ': ' + (days.length ? days.length + ' day' + (days.length > 1 ? 's' : '') + ' with problems (' + first + '). ' : '') + mainFinding(c),
+            { indent: 18, bullet: RES_COLOR[c.result === 'ok' ? 'check' : c.result], size: 11.5 });
+          c.actions.concat.apply(c.actions.slice(), days.map(function (d) { return d.a.components[i].actions; })).forEach(function (y) { if (acts.indexOf(y) === -1) acts.push(y); });
+        });
+        if (acts.length) {
+          doc.text('Recommended action', { weight: 800, size: 11.5, keepNext: true, after: 1, indent: 18 });
+          acts.forEach(function (y) { doc.text(y, { indent: 34, bullet: '#2f6bff', size: 11 }); });
+        }
+      });
+    }
+    doc.space(8).text('Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment.', { size: 10.5, color: PAPER.muted });
+    return doc;
+  }
+  // Loads the month for each station (two at a time), checks each day, then saves the report.
+  function exportGroupMonthly(kind, button) {
+    var ym = state.maint.month || dateOf(Date.now()).slice(0, 7);
+    var r = periodRange(ym + '-01', 'month');
+    if (r.from >= r.to) { alert('That month has not started yet.'); return; }
+    var sts = maintRows().rows.map(function (x) { return x.st; });
+    if (!sts.length) return;
+    if (sts.length > 20 && !confirm('This loads a month of data for ' + sts.length + ' stations, which can take several minutes. Continue?')) return;
+    var cur = currentGroup();
+    var desc = cur ? cur.name : state.scope === 'selected' ? 'Selected stations' : 'All stations';
+    var label = button.innerHTML, queue = sts.slice(), done = 0, out = [], failed = [];
+    button.disabled = true;
+    function show() { button.textContent = 'Loading ' + done + ' of ' + sts.length + '…'; }
+    show();
+    function next() {
+      if (!queue.length) return Promise.resolve();
+      var st = queue.shift();
+      return fetchRange(st.id, r.from, r.to).then(function (rows) {
+        var a = assessStation(st, rows, r);
+        a.daily = dailyAssess(st, rows, r.from, r.to);
+        out.push({ st: st, a: a });
+      }).catch(function (err) {
+        if (err instanceof SignedOut) { queue.length = 0; throw err; }
+        failed.push(st.label);
+      }).then(function () { done++; show(); return next(); });
+    }
+    Promise.all([next(), next()]).then(function () {
+      button.disabled = false; button.innerHTML = label;
+      if (failed.length) alert('Could not load ' + failed.length + ' station(s): ' + failed.join(', ') + '. The report leaves them out.');
+      out.sort(function (x, y) { return OVERALL[y.a.overall].rank - OVERALL[x.a.overall].rank || x.st.label.localeCompare(y.st.label); });
+      return exportDoc(function () { return groupMonthDoc(out, ym, desc); },
+        'AutoWx_' + fileSafe(desc) + '_monthly_maintenance_' + ym, kind, button);
+    }).catch(function (err) {
+      button.disabled = false; button.innerHTML = label;
+      alert(err instanceof SignedOut ? 'You have been signed out of cserv. Sign in again, then reopen AutoWx.' : 'Could not make the report: ' + ((err && err.message) || err));
+    });
+  }
+
   var ROUTINE = [
     'Check the site: fence, vegetation cut low, no new obstructions near the sensors.',
     'Clean the radiation shield, rain gauge funnel and bucket, pyranometer dome and solar panel.',
@@ -3117,6 +3423,8 @@
     '.rb-r{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}',
     '.dl-bar{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 14px;margin-bottom:12px}',
     '.dl-l{display:flex;align-items:center;gap:8px}.dl-l .ic{color:var(--brand)}.dl-b{display:flex;gap:8px}.dl-n{color:var(--muted);font-size:12.5px;margin-left:auto}',
+    '.month-bar{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 14px;margin:-4px 0 12px}',
+    '.month-bar input{font:inherit;font-weight:600;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text)}',
     '.zoomable{cursor:zoom-in;border-radius:8px}.zoomable:hover{background:var(--panel)}',
     '.mtools{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}',
     '.mt-dl{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted)}.mt-dl .ic{width:15px;height:15px}',
@@ -3134,6 +3442,10 @@
     '.zper-l{display:inline-flex;align-items:center;gap:6px;font-weight:800;margin-right:2px}.zper-l .ic{width:17px;height:17px;color:var(--brand)}',
     '.zper input,.zper select{font:inherit;font-weight:600;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text)}',
     '.btn.on{background:#2f6bff;border-color:#2f6bff;color:#fff}.zper-n{color:var(--muted);font-size:12.5px;margin-left:auto}',
+    '.zdays-w{margin:10px 0 2px}.zdays-h{font-size:12.5px;font-weight:700;color:var(--muted);margin-bottom:6px}',
+    '.zdays{display:flex;flex-wrap:wrap;gap:4px}.zday{width:30px;height:26px;border:0;border-radius:6px;font:inherit;font-size:11.5px;font-weight:800;cursor:pointer;color:#fff}',
+    '.zday.r-ok{background:' + C.green + '}.zday.r-check{background:' + C.yellow + ';color:#3d2a00}.zday.r-fault{background:' + C.red + '}',
+    '.zday.r-na{background:var(--glass-line);color:var(--muted)}.zday:hover{outline:2px solid var(--brand);outline-offset:1px}.zdrow{cursor:pointer}',
     '.zload{color:var(--brand);font-weight:700;font-size:13px}.zerr{color:var(--danger);font-weight:700;font-size:13px}',
     '.zchart{border:1px solid var(--line);border-radius:12px;overflow:hidden}.zchart canvas{display:block;touch-action:pan-y;cursor:crosshair}',
     '.zlegend{display:flex;gap:6px 16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:8px 2px}',
@@ -3208,6 +3520,8 @@
       else if (act === 'net-pdf' || act === 'net-jpeg') exportNetwork(act === 'net-pdf' ? 'pdf' : 'jpeg', el);
       else if (act === 'zoom-close') closeZoom();
       else if (act === 'zoom-latest' && state.zoom) zoomLatest();
+      else if (act === 'gmonth-pdf' || act === 'gmonth-jpeg') exportGroupMonthly(act === 'gmonth-pdf' ? 'pdf' : 'jpeg', el);
+      else if (act === 'month-pdf' || act === 'month-jpeg') exportMonthly(state.maint.open, act === 'month-pdf' ? 'pdf' : 'jpeg', el);
       else if ((act === 'zoom-pdf' || act === 'zoom-jpeg') && state.zoom) exportInstrument(state.zoom.id, state.zoom.key, act === 'zoom-pdf' ? 'pdf' : 'jpeg', el);
       else if (act === 'maint-print') window.print();
       else if (act === 'fit') { state.fit = !state.fit; state.view = 'weather'; save(); render(); window.scrollTo(0, 0); }
@@ -3217,6 +3531,7 @@
     if ((el = t.closest('[data-ipdf]'))) { exportInstrument(state.maint.open, el.getAttribute('data-ipdf'), 'pdf', el); return; }
     if ((el = t.closest('[data-ijpeg]'))) { exportInstrument(state.maint.open, el.getAttribute('data-ijpeg'), 'jpeg', el); return; }
     if ((el = t.closest('[data-zday]')) && state.zoom) { zoomStepDay(+el.getAttribute('data-zday')); return; }
+    if ((el = t.closest('[data-zjump]')) && state.zoom) { loadZoomPeriod(el.getAttribute('data-zjump'), 1); return; }
     if ((el = t.closest('[data-zrange]')) && state.zoom) {
       var za = state.zoom.a, zv = el.getAttribute('data-zrange'), zh = zv === 'all' ? za.to - za.from : +zv * HOUR;
       setZoomRange(za.to - zh, za.to); return;
@@ -3268,8 +3583,9 @@
   });
 
   document.body.addEventListener('change', function (e) {
+    if (e.target.id === 'wn-month') { state.maint.month = e.target.value; return; }
     if (state.zoom && (e.target.id === 'wn-zdate' || e.target.id === 'wn-zdays')) {
-      var zdate = document.getElementById('wn-zdate').value, zdays = +document.getElementById('wn-zdays').value;
+      var zdate = document.getElementById('wn-zdate').value, zv = document.getElementById('wn-zdays').value, zdays = zv === 'month' ? 'month' : +zv;
       if (zdate) loadZoomPeriod(zdate, zdays);
       return;
     }
