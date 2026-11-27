@@ -3221,8 +3221,11 @@
   }
   // single: one station, faults only. Otherwise a group: faults and instruments that need checking.
   // Each problem is a compact card with its graph; two cards per A4 page.
+  // One station with no faults but instruments needing attention: list those (Check) instead of an empty report.
+  function stationNeedsCheckOnly(a) { return !faultyComps(a).length && faultyComps(a, true).length > 0; }
   function faultDoc(list, title, sub, periodText, single) {
-    var withCheck = !single, items = [];
+    var attentionOnly = single && list[0] && stationNeedsCheckOnly(list[0].a);
+    var withCheck = !single || attentionOnly, items = [];
     list.forEach(function (x) { faultyComps(x.a, withCheck).forEach(function (c) { items.push({ x: x, c: c, lv: compLevel(x.a, c, withCheck) }); }); });
     var nFaults = items.filter(function (it) { return it.lv === 'fault'; }).length, nChecks = items.length - nFaults;
     var clean = list.filter(function (x) { return !faultyComps(x.a, withCheck).length; });
@@ -3232,8 +3235,8 @@
       doc.source = single && list[0] ? stationLink(list[0].st) : LIST_LINK;
       doc.a4Images = true;   // JPEG as A4 pages, ready to print on bond paper
       var pillText = nFaults ? nFaults + ' fault' + (nFaults > 1 ? 's' : '') + (nChecks ? ' · ' + nChecks + ' to check' : '')
-        : nChecks ? nChecks + ' to check' : single ? 'No faults' : 'No problems';
-      doc.header(single ? 'Fault report' : 'Fault and check report', title, sub, nFaults ? 'fault' : nChecks ? 'check' : 'ok', pillText,
+        : nChecks ? (single ? 'No faults · ' : '') + nChecks + ' to check' : single ? 'No faults' : 'No problems';
+      doc.header(single ? (attentionOnly ? 'Fault report · needs attention' : 'Fault report') : 'Fault and check report', title, sub, nFaults ? 'fault' : nChecks ? 'check' : 'ok', pillText,
         ['Period: ' + periodText, r0 ? rangeLabel(r0.from, r0.to) : '', 'Report made ' + stamp(Date.now())]);
       if (!single) {
         var st = { maintenance: 0, attention: 0, offline: 0 };
@@ -3245,7 +3248,9 @@
     }
     function finish(doc) {
       if (!single && clean.length) doc.space(4).text('All clear: ' + clean.map(function (x) { return x.st.label; }).join(', ') + '.', { size: 10.5, color: PAPER.muted, after: 2 });
-      doc.space(4).text(single ? 'Faults only. Items rated Check are left out; see the station maintenance report for those.'
+      doc.space(4).text(attentionOnly ? 'No faults were found in this period, so this report lists the instruments that need attention (rated Check). ' +
+        'Checks can also be caused by unusual weather; confirm on site before replacing equipment.'
+        : single ? 'Faults only. Items rated Check are left out; see the station maintenance report for those.'
         : 'Faults and instruments that need checking. Findings marked Check can also be caused by unusual weather; confirm on site before replacing equipment.',
         { size: 9.5, color: PAPER.muted });
       return doc;
@@ -3253,7 +3258,7 @@
     var doc = start();
     doc.cardsPerPage = 2;   // two faults per A4 page
     if (!items.length) {
-      doc.callout(single ? 'No faults were found at this station in this period. Items needing a check (not faults) are left out of this report.'
+      doc.callout(single ? 'No faults and no instruments needing attention were found at this station in this period.'
         : 'No faults and no instruments needing a check were found at these stations in this period.', 'ok');
       return finish(doc);
     }
@@ -3307,7 +3312,7 @@
       var tag = code === 'month' ? ym : code === '7d' ? 'last7days' : 'last' + code;
       var base = 'AutoWx_' + (group ? fileSafe(desc) : fileSafe(out[0].st.siteId) + '_' + fileSafe(out[0].st.label)) + (group ? '_faults_checks_' : '_faults_') + tag +
         (code === 'month' ? '' : '_' + fileStamp(Date.now()));
-      if (kind === 'xlsx') { saveFile(faultWorkbook(out, periodText, group), base + '.xlsx'); return; }
+      if (kind === 'xlsx') { saveFile(faultWorkbook(out, periodText, group || stationNeedsCheckOnly(out[0].a)), base + '.xlsx'); return; }
       return exportDoc(function () { return faultDoc(out, title, sub, periodText, !group); }, base, kind, button);
     }).catch(function (err) {
       button.disabled = false; button.innerHTML = label;
